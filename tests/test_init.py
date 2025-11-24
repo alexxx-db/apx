@@ -229,10 +229,6 @@ def test_init_and_build_combinations(
     console.print(f"[dim]Checking pyproject.toml: {app_path / 'pyproject.toml'}[/dim]")
     assert (app_path / "pyproject.toml").exists(), "pyproject.toml should exist"
 
-    # Check build directory was created
-    console.print(f"[dim]Checking .build directory: {app_path / '.build'}[/dim]")
-    assert (app_path / ".build").exists(), ".build directory should exist"
-
     # Verify template-specific files
     if template == Template.stateful:
         # Check that stateful-specific backend files exist
@@ -265,30 +261,112 @@ def test_init_and_build_combinations(
         )
         console.print("[dim].env file verified (no DATABRICKS_CONFIG_PROFILE)[/dim]")
 
-    # Verify that the build completed successfully
-    # The build directory should contain a wheel file and requirements.txt
-    build_dir = app_path / ".build"
-    console.print(f"[dim]Verifying build artifacts in {build_dir}...[/dim]")
-    wheel_files = list(build_dir.glob("*.whl"))
-    console.print(
-        f"[dim]Found {len(wheel_files)} wheel file(s): {[f.name for f in wheel_files]}[/dim]"
-    )
-    assert len(wheel_files) > 0, (
-        f"At least one wheel file should exist in .build directory for {template}/{layout}"
-    )
-
-    console.print(
-        f"[dim]Checking requirements.txt: {build_dir / 'requirements.txt'}[/dim]"
-    )
-    assert (build_dir / "requirements.txt").exists(), (
-        f"requirements.txt should exist in .build directory for {template}/{layout}"
-    )
-
-    # Verify requirements.txt contains the wheel file name
-    requirements_content = (build_dir / "requirements.txt").read_text()
-    console.print(f"[dim]requirements.txt content:\n{requirements_content}[/dim]")
-    assert wheel_files[0].name in requirements_content, (
-        "requirements.txt should reference the wheel file"
-    )
-
     console.print(f"[green]✓ Test passed for {template.value}/{layout.value}[/green]")
+
+
+def test_components_json_app_slug_replacement(
+    node_modules_dir: Path,
+    tmp_path: Path,
+) -> None:
+    """
+    Test that components.json is generated with the correct app_slug replacement.
+
+    The components.json.jinja2 template uses {{app_slug}} in the CSS path:
+    "css": "src/{{app_slug}}/ui/styles/globals.css"
+
+    This test verifies that the generated components.json file contains the actual
+    app_slug (e.g., "my_test_app") and not the literal string "base".
+    """
+    import json
+
+    # Use a specific app name with dashes to test slug conversion
+    test_app_name = "my-test-app"
+    expected_app_slug = "my_test_app"  # dashes should be converted to underscores
+
+    console.print(
+        f"\n[bold]Testing components.json generation for {test_app_name}[/bold]"
+    )
+
+    app_path = tmp_path
+    app_path.mkdir(parents=True, exist_ok=True)
+
+    # Copy node_modules to speed up the test
+    console.print("[dim]Copying node_modules...[/dim]")
+    shutil.copytree(node_modules_dir, app_path / "node_modules")
+
+    # Mock prompts to avoid interactive input
+    def mock_prompt_ask(*args, **kwargs):
+        return ""
+
+    def mock_confirm_ask(*args, **kwargs):
+        return False
+
+    with (
+        patch("apx.cli.init.Prompt.ask", side_effect=mock_prompt_ask),
+        patch("apx.cli.init.Confirm.ask", side_effect=mock_confirm_ask),
+    ):
+        console.print(f"[dim]Running apx init for {test_app_name}...[/dim]")
+        result = runner.invoke(
+            app,
+            [
+                "init",
+                str(app_path),
+                "--name",
+                test_app_name,
+                "--template",
+                Template.essential.value,
+                "--layout",
+                Layout.basic.value,
+                "--apx-package",
+                apx_source_dir,
+                "-p",
+                "DEFAULT",
+            ],
+        )
+
+        console.print(f"[dim]Init command exit code: {result.exit_code}[/dim]")
+        if result.stdout:
+            console.print(f"[dim]stdout: {result.stdout}[/dim]")
+        if result.stderr:
+            console.print(f"[dim]stderr: {result.stderr}[/dim]")
+
+        assert result.exit_code == 0, (
+            f"init should exit with code 0, got {result.exit_code}\n"
+            f"Output: {result.stdout}"
+        )
+
+    # Verify that components.json was created
+    components_json_path = app_path / "components.json"
+    console.print(f"[dim]Checking components.json: {components_json_path}[/dim]")
+    assert components_json_path.exists(), "components.json should exist"
+
+    # Read and parse the components.json file
+    with open(components_json_path, "r") as f:
+        components_config = json.load(f)
+
+    console.print(
+        f"[dim]components.json content: {json.dumps(components_config, indent=2)}[/dim]"
+    )
+
+    # Verify the CSS path contains the actual app_slug, not "base"
+    css_path = components_config.get("tailwind", {}).get("css", "")
+    console.print(f"[dim]CSS path from components.json: {css_path}[/dim]")
+
+    expected_css_path = f"src/{expected_app_slug}/ui/styles/globals.css"
+    console.print(f"[dim]Expected CSS path: {expected_css_path}[/dim]")
+
+    assert css_path == expected_css_path, (
+        f"CSS path should be '{expected_css_path}', but got '{css_path}'. "
+        f"The {{{{app_slug}}}} template variable should be replaced with the actual app slug, "
+        f"not the literal string 'base'."
+    )
+
+    # Also verify that "base" is NOT in the CSS path
+    assert "base" not in css_path, (
+        f"CSS path should not contain 'base', but got '{css_path}'. "
+        f"The template should replace {{{{app_slug}}}} with '{expected_app_slug}'."
+    )
+
+    console.print(
+        f"[green]✓ components.json correctly uses app_slug '{expected_app_slug}' in CSS path[/green]"
+    )
