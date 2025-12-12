@@ -1,11 +1,12 @@
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import { existsSync, readFileSync } from "fs";
 import { join, resolve } from "path";
 import { parse } from "smol-toml";
 import axios from "axios";
+import type { IncomingMessage, ServerResponse } from "http";
 
 type ApxMetadata = {
   appName: string;
@@ -18,6 +19,55 @@ type PortsResponse = {
   backend_port: number;
   host: string;
 };
+
+type LogPayload = {
+  level: "error" | "warn";
+  source: "console" | "window" | "promise";
+  message: string;
+  stack?: string;
+  timestamp: number;
+};
+
+// Vite plugin to receive browser logs and print them to Node console
+function apxDevLogs(): Plugin {
+  return {
+    name: "apx-dev-logs",
+    configureServer(server) {
+      server.middlewares.use(
+        "/__apx/logs",
+        (req: IncomingMessage, res: ServerResponse) => {
+          if (req.method !== "POST") {
+            res.statusCode = 405;
+            res.end();
+            return;
+          }
+
+          let body = "";
+          req.on("data", (chunk) => (body += chunk));
+          req.on("end", () => {
+            try {
+              const payload: LogPayload = JSON.parse(body);
+              const time = new Date(payload.timestamp).toISOString();
+              // Plain text output without colors
+              process.stdout.write(
+                `browser | ${payload.source} | ${payload.level} | ${time} | ${payload.message}\n`,
+              );
+              if (payload.stack) {
+                process.stdout.write(
+                  `browser | ${payload.source} | ${payload.level} | ${time} | ${payload.stack}\n`,
+                );
+              }
+            } catch {
+              process.stdout.write(`browser | malformed | ${body}\n`);
+            }
+            res.statusCode = 204;
+            res.end();
+          });
+        },
+      );
+    },
+  };
+}
 
 // read metadata from pyproject.toml using toml npm package
 export function readMetadata(): ApxMetadata {
@@ -105,6 +155,7 @@ export default defineConfig(async () => {
       }),
       react(),
       tailwindcss(),
+      apxDevLogs(),
     ],
     // setup proxy for the api, only used in development
     server: {
