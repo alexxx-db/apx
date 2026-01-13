@@ -920,12 +920,14 @@ def run_backend_server(
     """
     import asyncio
     import traceback
+    from contextlib import asynccontextmanager
+    from collections.abc import AsyncIterator
 
     import uvicorn
     import watchfiles
     from databricks.sdk import WorkspaceClient
     from dotenv import load_dotenv
-    from fastapi import Request
+    from fastapi import FastAPI, Request
     from fastapi.responses import JSONResponse
     from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -933,15 +935,30 @@ def run_backend_server(
     from apx.cli.dev.reloader import load_app as _load_app_from_reloader
     from apx.constants import ACCESS_TOKEN_HEADER_NAME, FORWARDED_USER_HEADER_NAME
 
+    def wrap_lifespan_with_error_logging(app: FastAPI) -> None:
+        """Wrap the app's lifespan to catch and log startup/shutdown errors."""
+        original_lifespan = app.router.lifespan_context
+
+        @asynccontextmanager
+        async def wrapped_lifespan(wrapped_app: FastAPI) -> AsyncIterator[Any]:
+            try:
+                async with original_lifespan(wrapped_app) as state:
+                    yield state
+            except Exception as e:
+                backend_logger.error(f"App lifespan error: {e}")
+                backend_logger.error(traceback.format_exc())
+                raise
+
+        app.router.lifespan_context = wrapped_lifespan  # type: ignore[assignment]
+
     # Track if this is the first run
     first_run = True
     obo_token: str | None = None
 
     while True:
         try:
-            # Reload message
             if not first_run:
-                backend_logger.info("Detected file changes, reloading backend...")
+                backend_logger.info("Reloading backend server...")
 
             # Reload .env file on every iteration
             dotenv_file = cwd / ".env"
@@ -959,6 +976,9 @@ def run_backend_server(
             app_instance, _ = _load_app_from_reloader(
                 app_module_name, reload=not first_run
             )
+
+            # Wrap lifespan to catch and log startup errors
+            wrap_lifespan_with_error_logging(app_instance)
 
             # Regenerate OpenAPI schema and client if the schema changed
             from apx.cli.openapi import regenerate_openapi_if_changed
@@ -1049,9 +1069,15 @@ def run_backend_server(
                 srv_task = asyncio.create_task(serve(srv))
 
                 async def watch_files() -> None:
-                    async for _changes in watchfiles.awatch(
+                    async for changes in watchfiles.awatch(
                         cwd, watch_filter=watchfiles.PythonFilter()
                     ):
+                        file_paths = [
+                            str(Path(path).relative_to(cwd)) for _, path in changes
+                        ]
+                        backend_logger.info(
+                            f"Detected file changes, reloading backend: {', '.join(file_paths)}"
+                        )
                         return
 
                 watch_task_inner = asyncio.create_task(watch_files())
@@ -1061,6 +1087,35 @@ def run_backend_server(
                     return_when=asyncio.FIRST_COMPLETED,
                 )
 
+                # Log which task completed for debugging
+                srv_done = srv_task in done
+                watch_done = watch_task_inner in done
+
+                if srv_done and not watch_done:
+                    exc = srv_task.exception()
+                    if exc:
+                        backend_logger.error(f"Server crashed with exception: {exc}")
+                        # Cancel watcher and re-raise to trigger error handling
+                        for task in pending:
+                            task.cancel()
+                            try:
+                                await task
+                            except asyncio.CancelledError:
+                                pass
+                        raise exc
+                    else:
+                        # Server exited unexpectedly without exception - wait for file changes
+                        backend_logger.warning(
+                            "Server exited unexpectedly, waiting for file changes..."
+                        )
+                        # Keep watching for file changes before restarting
+                        await watch_task_inner
+                        # watch_task_inner completed, which means file changes were detected
+                        # (the logging happens inside watch_files())
+                        srv.should_exit = True
+                        return
+
+                # Normal case: watch task completed (file changes detected)
                 # Shutdown server gracefully
                 srv.should_exit = True
                 await asyncio.sleep(0.5)
@@ -1072,12 +1127,6 @@ def run_backend_server(
                         await task
                     except asyncio.CancelledError:
                         pass
-
-                # If server task crashed, re-raise
-                if srv_task in done:
-                    exc = srv_task.exception()
-                    if exc:
-                        raise exc
 
             asyncio.run(_run_server_and_watch(uvicorn_server))
 
@@ -1095,13 +1144,18 @@ def run_backend_server(
             try:
 
                 async def wait_for_change() -> None:
-                    async for _changes in watchfiles.awatch(
+                    async for changes in watchfiles.awatch(
                         cwd, watch_filter=watchfiles.PythonFilter()
                     ):
+                        file_paths = [
+                            str(Path(path).relative_to(cwd)) for _, path in changes
+                        ]
+                        backend_logger.info(
+                            f"Detected file changes, retrying: {', '.join(file_paths)}"
+                        )
                         return
 
                 asyncio.run(wait_for_change())
-                backend_logger.info("Detected file changes, retrying...")
             except KeyboardInterrupt:
                 backend_logger.info("Backend received shutdown signal")
                 break
