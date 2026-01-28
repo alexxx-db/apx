@@ -48,3 +48,4 @@ def get_forwarded_user_header() -> str:
     except Exception:
         workspace_id = "placeholder"
     return f"{user_id}@{workspace_id}"
+

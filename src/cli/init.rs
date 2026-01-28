@@ -15,7 +15,8 @@ use crate::cli::run_cli_async;
 use crate::cli::components::add::{add_components, ComponentInput};
 use crate::common::{bun_install, read_project_metadata, write_metadata_file, spinner, format_elapsed_ms, run_with_spinner, run_with_spinner_async};
 use crate::dotenv::DotenvFile;
-use crate::interop::{list_profiles, templates_dir};
+use crate::common::list_profiles;
+use crate::interop::templates_dir;
 
 const APX_INDEX_URL: &str = "https://databricks-solutions.github.io/apx/simple";
 

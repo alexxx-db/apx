@@ -57,23 +57,6 @@ fn resolve_frontend_entrypoint_path(py: Python<'_>) -> PyResult<PathBuf> {
     Ok(PathBuf::from(entrypoint_path_str))
 }
 
-pub(crate) fn list_profiles() -> Result<Vec<String>, String> {
-    Python::attach(|py| {
-        let utils = py
-            .import("apx.utils")
-            .map_err(|err| format!("Failed to import apx.utils: {err}"))?;
-        let func = utils
-            .getattr("list_profiles")
-            .map_err(|err| format!("Failed to access list_profiles: {err}"))?;
-        let profiles = func
-            .call0()
-            .map_err(|err| format!("Failed to call list_profiles: {err}"))?;
-        profiles
-            .extract::<Vec<String>>()
-            .map_err(|err| format!("Failed to parse profiles: {err}"))
-    })
-}
-
 pub(crate) fn templates_dir() -> Result<PathBuf, String> {
     Python::attach(|py| {
         let importlib = py
