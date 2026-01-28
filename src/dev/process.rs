@@ -345,6 +345,7 @@ impl ProcessManager {
     }
 
     /// Create a uvicorn logging config file (JSON format, no pyyaml dependency).
+    /// Always overwrites the existing config to ensure format updates are applied.
     async fn create_uvicorn_log_config(&self, app_dir: &Path) -> Result<String, String> {
         let config_dir = app_dir.join(".apx");
         tokio::fs::create_dir_all(&config_dir)
@@ -354,6 +355,9 @@ impl ProcessManager {
         let config_path = config_dir.join("uvicorn_logging.json");
         // APX adds: timestamp | source | channel | <this output>
         // So we only need: location | message
+        //
+        // IMPORTANT: Uvicorn's access logger passes values as positional args, not named fields.
+        // Use %(message)s to get the pre-formatted message, not %(client_addr)s etc.
         let config_content = r#"{
   "version": 1,
   "disable_existing_loggers": false,
@@ -362,7 +366,7 @@ impl ProcessManager {
       "format": "%(module)s.%(funcName)s | %(message)s"
     },
     "access": {
-      "format": "%(client_addr)s - \"%(request_line)s\" %(status_code)s"
+      "format": "%(message)s"
     }
   },
   "handlers": {

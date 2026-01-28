@@ -76,10 +76,10 @@ jobs:
       - name: Install just
         uses: extractions/setup-just@v2
 
-      - name: Install dependencies
+      - name: Build project in development mode
         run: |
-          uv sync --all-groups
-          bun install
+          cargo check
+          uvx maturin develop
 
       - name: Configure git for tests
         run: |
