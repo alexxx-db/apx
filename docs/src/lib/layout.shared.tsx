@@ -5,7 +5,7 @@ export function baseOptions(): BaseLayoutProps {
     nav: {
       title: (
         <div className="flex items-center gap-2">
-          <img src="/logo.svg" alt="apx" className="w-6 h-6 rounded" />
+          <img src="/apx/logo.svg" alt="apx" className="w-6 h-6 rounded" />
         </div>
       ),
     },
