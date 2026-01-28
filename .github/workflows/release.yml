@@ -10,6 +10,12 @@ permissions:
   pages: write
   id-token: write
 
+env:
+  CARGO_TERM_COLOR: always
+  # Enable sccache for faster builds
+  SCCACHE_GHA_ENABLED: "true"
+  RUSTC_WRAPPER: "sccache"
+
 jobs:
   build-wheels:
     name: Build wheels on ${{ matrix.os }}
@@ -35,12 +41,22 @@ jobs:
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.88.0"
 
-      - name: Cache Rust
+      - name: Run sccache-cache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
+        with:
+          # Use same shared-key as CI for cache sharing
+          shared-key: "rust-cache"
+          # Cache all crates for better hit rate
+          cache-all-crates: "true"
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
 
@@ -59,7 +75,7 @@ jobs:
         with:
           path: |
             ~/.bun/install/cache
-          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lockb') }}
+          key: ${{ runner.os }}-bun-${{ hashFiles('docs/bun.lock') }}
           restore-keys: |
             ${{ runner.os }}-bun-
 
@@ -118,7 +134,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
 
@@ -132,7 +148,7 @@ jobs:
         with:
           path: |
             ~/.bun/install/cache
-          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lockb') }}
+          key: ${{ runner.os }}-bun-${{ hashFiles('docs/bun.lock') }}
           restore-keys: |
             ${{ runner.os }}-bun-
 
