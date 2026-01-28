@@ -39,7 +39,7 @@ gen folder profile *args: sync
 
 [working-directory: "docs"]
 docs *args:
-    bun run {{args}}
+    bun {{args}}
 
 # Build complete static site (docs + simple package index)
 pages:
