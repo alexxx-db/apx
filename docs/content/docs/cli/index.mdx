@@ -245,7 +245,11 @@ uv run apx dev apply <ADDON>
 
 ## components
 
-Manage UI components using shadcn/ui.
+A CLI for working with [shadcn registries](https://ui.shadcn.com/docs/registry). apx provides tooling to add components from any shadcn-compatible registry to your project.
+
+<Callout type="info">
+**Note:** apx does not use a `components.json` file. Component registries are configured in `pyproject.toml` under the `[tool.apx.ui.registries]` section. The [shadcn/ui](https://ui.shadcn.com/) registry is used as the default, so there's no need to add it manually.
+</Callout>
 
 ### components add
 
@@ -261,35 +265,46 @@ uv run apx components add [OPTIONS] <COMPONENT> [APP_PATH]
 
 #### Options
 
-| Option                  | Description                         |
-| ----------------------- | ----------------------------------- |
-| `--registry <REGISTRY>` | Registry name from components.json  |
-| `--force`               | Overwrite existing files            |
-| `--dry-run`             | Print actions without writing files |
+| Option                  | Description                                              |
+| ----------------------- | -------------------------------------------------------- |
+| `--registry <REGISTRY>` | Registry alias from `pyproject.toml` (e.g., `@animate-ui`) |
+| `--force`               | Overwrite existing files                                 |
+| `--dry-run`             | Print actions without writing files                      |
 
 #### Examples
 
 ```bash
-# Add from default registry
+# Add from default registry (shadcn/ui)
 uv run apx components add button
 
 # Add from specific registry
-uv run apx components add accordion --registry animate-ui
+uv run apx components add accordion --registry @animate-ui
 
 # Force overwrite
 uv run apx components add card --force
 ```
 
+#### Registry Configuration
+
+Registries are configured in `pyproject.toml`:
+
+```toml
+[tool.apx.ui.registries]
+"@animate-ui" = "https://animate-ui.com/r/{name}.json"
+"@ai-elements" = "https://registry.ai-sdk.dev/{name}.json"
+"@svgl" = "https://svgl.app/r/{name}.json"
+```
+
 #### Preconfigured Registries
 
-Projects include these component repositories:
+Projects include these component repositories by default:
 
-| Repository                            | Description                   |
-| ------------------------------------- | ----------------------------- |
-| [shadcn/ui](https://ui.shadcn.com/)   | Core UI components            |
-| [animate-ui](https://animate-ui.com/) | Animation components          |
-| [ai-sdk](https://ai-sdk.dev/)         | AI components (chat, prompts) |
-| [svgl](https://svgl.app/)             | SVG icons collection          |
+| Repository                            | Alias          | Description                   |
+| ------------------------------------- | -------------- | ----------------------------- |
+| [shadcn/ui](https://ui.shadcn.com/)   | (default)      | Core UI components            |
+| [animate-ui](https://animate-ui.com/) | `@animate-ui`  | Animation components          |
+| [ai-sdk](https://ai-sdk.dev/)         | `@ai-elements` | AI components (chat, prompts) |
+| [svgl](https://svgl.app/)             | `@svgl`        | SVG icons collection          |
 
 ---
 
@@ -340,6 +355,10 @@ uv run apx bun <ARGS>
 ## flux
 
 Flux OTEL collector commands for observability.
+
+<Callout type="info">
+**Note:** You typically don't need to use flux commands directly. When you run `apx dev start`, apx automatically starts the log collector and keeps it running alongside your development servers. The flux commands are provided for advanced use cases where you need manual control over the collector.
+</Callout>
 
 ### flux start
 
