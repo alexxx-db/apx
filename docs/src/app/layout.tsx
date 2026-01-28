@@ -1,6 +1,16 @@
+import type { Metadata } from "next";
 import { DM_Sans, DM_Mono } from "next/font/google";
 import { Provider } from "@/components/provider";
 import "./global.css";
+
+export const metadata: Metadata = {
+  title: "apx - Databricks Apps Toolkit",
+  description:
+    "Reliable, feature-full, human and LLM friendly development toolkit for building Databricks Apps",
+  icons: {
+    icon: "/apx/logo.svg",
+  },
+};
 
 const dmSans = DM_Sans({
   subsets: ["latin"],
