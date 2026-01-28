@@ -503,7 +503,7 @@ pub async fn resolve_component_closure(
 
 pub async fn plan_add(
     client: &reqwest::Client,
-    app_dir: &Path,
+    _app_dir: &Path,
     cfg: &UiConfig,
     registry: Option<&str>,
     component: &str,
@@ -514,9 +514,9 @@ pub async fn plan_add(
         "Planning component addition"
     );
 
-    let components_base_dir = app_dir.join(cfg.components_dir());
-    let lib_base_dir = app_dir.join(cfg.lib_dir());
-    let hooks_base_dir = app_dir.join(cfg.hooks_dir());
+    let components_base_dir = cfg.components_dir();
+    let lib_base_dir = cfg.lib_dir();
+    let hooks_base_dir = cfg.hooks_dir();
 
     let discovered = fetch_registry_catalog_impl(client).await?;
     let merged_registries = merge_registries(&cfg.registries, &discovered);

@@ -212,7 +212,7 @@ pub async fn add_components(
     // Apply CSS updates for all components at once
     let css_mutations = collect_css_mutations(&all_resolved);
     if !css_mutations.is_empty() {
-        let css_path = app_dir.join(cfg.css_path());
+        let css_path = cfg.css_path();
         match apply_css_updates(&css_path, css_mutations) {
             Ok(()) => {
                 result.css_updated_path = Some(format_relative_path(&css_path, app_dir));
