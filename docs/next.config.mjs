@@ -8,6 +8,7 @@ const config = {
   distDir: "../.pages",
   reactStrictMode: true,
   basePath: "/apx",
+  assetPrefix: "/apx",
 };
 
 export default withMDX(config);
