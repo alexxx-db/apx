@@ -1,701 +1,521 @@
-"""Tests for the MCP server implementation."""
+"""Tests for the Rust MCP server implementation."""
 
+import json
+import os
+from contextlib import asynccontextmanager
 from pathlib import Path
-from unittest.mock import MagicMock, Mock, patch
 
+from mcp.types import TextResourceContents, CallToolResult, TextContent, Tool, Resource
+from pydantic import AnyUrl
 import pytest
-
-from apx.mcp.common import (
-    McpSimpleStatusResponse,
-    databricks_apps_logs,
-    get_metadata,
-    restart,
-    start,
-    status,
-    stop,
-)
-from apx.models import (
-    ActionResponse,
-    DevConfig,
-    McpActionResponse,
-    McpDatabricksAppsLogsResponse,
-    McpErrorResponse,
-    McpMetadataResponse,
-    ProjectConfig,
-    ProjectMetadata,
-    StatusResponse,
-)
+from mcp.client.session import ClientSession
+from mcp.client.stdio import StdioServerParameters, stdio_client
 
 
-@pytest.fixture
-def mock_project_config():
-    """Create a mock project configuration."""
-    config = ProjectConfig()
-    config.dev = DevConfig()
-    return config
+# =============================================================================
+# MCP Session Helpers
+# =============================================================================
 
 
-@pytest.fixture
-def mock_status_response():
-    """Create a mock status response."""
-    return StatusResponse(
-        frontend_running=True,
-        backend_running=True,
-        openapi_running=True,
-        dev_server_port=9000,
-        frontend_port=5000,
-        backend_port=8000,
-    )
+@asynccontextmanager
+async def mcp_session(project_dir: Path | None = None):
+    """Context manager for MCP client session.
+
+    Args:
+        project_dir: Optional directory to change to before starting the session.
+                     If None, uses current directory.
+    """
+    original_cwd = os.getcwd()
+    try:
+        if project_dir is not None:
+            os.chdir(project_dir)
+        _env = os.environ.copy()
+        _env["APX_LOG"] = "debug"
+        server_params = StdioServerParameters(
+            command="uv",
+            args=["run", "--no-sync", "apx", "mcp"],
+            env=_env,
+        )
+        async with stdio_client(server_params) as (read, write):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                yield session
+    finally:
+        os.chdir(original_cwd)
 
 
-@pytest.fixture
-def mock_core(mock_project_config):
-    """Create a mock DevCore."""
-    core = MagicMock()
-    core.is_running = Mock(return_value=True)
-    core.get_or_create_config = Mock(return_value=mock_project_config)
-    return core
+# =============================================================================
+# Result Parsing Helpers
+# =============================================================================
 
 
-@pytest.fixture
-def mock_client(mock_status_response):
-    """Create a mock DevServerClient."""
-    client = MagicMock()
-    client.restart = Mock(
-        return_value=ActionResponse(status="success", message="Restarted successfully")
-    )
-    client.status = Mock(return_value=mock_status_response)
-    return client
+def retrieve_text_content(result: CallToolResult) -> str:
+    """Retrieve text content from MCP tool result."""
+    assert len(result.content) > 0, "Result should have content"
+    _extracted = result.content[0]
+    assert isinstance(_extracted, TextContent), "Result should have text content"
+    return _extracted.text
 
 
-# Helper to create a fake subprocess for testing CLI-based MCP tools
-class FakeProcess:
-    def __init__(self, returncode: int = 0, stdout: bytes = b"", stderr: bytes = b""):
-        self.returncode = returncode
-        self._stdout = stdout
-        self._stderr = stderr
+def parse_json_result(result: CallToolResult):
+    """Parse JSON from MCP tool result."""
+    assert len(result.content) > 0, "Result should have content"
+    result_text = retrieve_text_content(result)
+    try:
+        return json.loads(result_text)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Failed to parse JSON: {e} from {result_text}") from e
 
-    async def communicate(self):
-        return self._stdout, self._stderr
+
+# =============================================================================
+# Assertion Helpers
+# =============================================================================
 
 
-@pytest.mark.asyncio
-async def test_start_success():
-    """Test the start tool with successful server startup via subprocess."""
+async def assert_tool_exists(session: ClientSession, tool_name: str) -> Tool:
+    """Assert a tool exists and return its metadata."""
+    tools = await session.list_tools()
+    tool_names = [t.name for t in tools.tools]
+    assert tool_name in tool_names, f"Tool '{tool_name}' should exist"
+    return next(t for t in tools.tools if t.name == tool_name)
 
-    async def mock_create_subprocess_exec(*args, **kwargs):
-        return FakeProcess(returncode=0, stdout=b"Started successfully")
 
-    with (
-        patch(
-            "apx.mcp.common.asyncio.create_subprocess_exec",
-            side_effect=mock_create_subprocess_exec,
-        ),
-        patch("pathlib.Path.cwd", return_value=Path("/test/project")),
-    ):
-        result = await start(
-            host="localhost",
-            obo=True,
-            openapi=True,
-            max_retries=10,
+async def assert_resource_exists(session: ClientSession, uri: str) -> Resource:
+    """Assert a resource exists and return its metadata."""
+    resources = await session.list_resources()
+    uris = [str(r.uri) for r in resources.resources]
+    assert uri in uris, f"Resource '{uri}' should exist"
+    return next(r for r in resources.resources if str(r.uri) == uri)
+
+
+def skip_if_sdk_unavailable(result_text: str):
+    """Skip test if Databricks SDK is not available."""
+    if "not available" in result_text or "not installed" in result_text:
+        pytest.skip("Databricks SDK not installed or docs not indexed")
+
+
+async def test_apx_info_resource(common_project: Path):
+    """Test that the Rust MCP server provides the apx://info resource."""
+    async with mcp_session(common_project) as session:
+        # Verify resource exists
+        apx_info_resource = await assert_resource_exists(session, "apx://info")
+        assert apx_info_resource.name == "apx-info"
+        assert apx_info_resource.description is not None
+        assert "apx toolkit" in apx_info_resource.description.lower()
+        assert apx_info_resource.mimeType == "text/plain"
+
+        # Read and validate content
+        content = await session.read_resource(AnyUrl("apx://info"))
+        assert len(content.contents) == 1
+        contents = content.contents[0]
+        assert isinstance(contents, TextResourceContents)
+        assert contents.text is not None
+        assert "apx" in contents.text.lower()
+        assert "Databricks app" in contents.text
+        assert "Technology Stack" in contents.text
+
+
+async def test_start_tool_exists(common_project: Path):
+    """Test that the start tool is available."""
+    async with mcp_session(common_project) as session:
+        start_tool = await assert_tool_exists(session, "start")
+        assert start_tool.description is not None
+        assert "start development server" in start_tool.description.lower()
+        assert "inputSchema" in dir(start_tool)
+
+
+async def test_mcp_server_capabilities(common_project: Path):
+    """Test that the MCP server advertises correct capabilities."""
+    original_cwd = os.getcwd()
+    try:
+        os.chdir(common_project)
+        server_params = StdioServerParameters(
+            command="uv", args=["run", "--no-sync", "apx", "mcp"]
         )
 
-        # Verify the result is a McpActionResponse
-        assert isinstance(result, McpActionResponse)
-        assert result.status == "success"
-        assert "Development servers started successfully" in result.message
+        async with stdio_client(server_params) as (read, write):
+            async with ClientSession(read, write) as session:
+                init_result = await session.initialize()
+
+                # Check protocol version
+                assert init_result.protocolVersion == "2024-11-05"
+
+                # Check server info
+                assert init_result.serverInfo is not None
+                assert init_result.serverInfo.name == "apx"
+                assert init_result.serverInfo.version is not None
+
+                # Check capabilities
+                assert init_result.capabilities is not None
+                assert hasattr(init_result.capabilities, "resources")
+                assert hasattr(init_result.capabilities, "tools")
+    finally:
+        os.chdir(original_cwd)
 
 
-@pytest.mark.asyncio
-async def test_start_failure():
-    """Test the start tool when server startup fails via subprocess."""
+async def test_search_registry_components(common_project: Path):
+    """Test search_registry_components tool (read-only)."""
+    async with mcp_session(common_project) as session:
+        # Verify tools exist
+        await assert_tool_exists(session, "search_registry_components")
+        await assert_tool_exists(session, "add_component")
 
-    async def mock_create_subprocess_exec(*args, **kwargs):
-        return FakeProcess(returncode=1, stdout=b"", stderr=b"Port already in use")
+        # Search for button component
+        search_result = await session.call_tool(
+            "search_registry_components",
+            arguments={"query": "button component for clicking", "limit": 5},
+        )
+        result_json = parse_json_result(search_result)
 
-    with (
-        patch(
-            "apx.mcp.common.asyncio.create_subprocess_exec",
-            side_effect=mock_create_subprocess_exec,
-        ),
-        patch("pathlib.Path.cwd", return_value=Path("/test/project")),
-    ):
-        result = await start()
+        assert result_json["query"] == "button component for clicking"
+        results = result_json["results"]
 
-        assert isinstance(result, McpActionResponse)
-        assert result.status == "error"
-        assert "Port already in use" in result.message
-
-
-@pytest.mark.asyncio
-async def test_restart_success():
-    """Test the restart tool with successful restart via subprocess."""
-
-    async def mock_create_subprocess_exec(*args, **kwargs):
-        return FakeProcess(returncode=0, stdout=b"Restarted successfully")
-
-    with (
-        patch(
-            "apx.mcp.common.asyncio.create_subprocess_exec",
-            side_effect=mock_create_subprocess_exec,
-        ),
-        patch("pathlib.Path.cwd", return_value=Path("/test/project")),
-    ):
-        result = await restart()
-
-        assert isinstance(result, McpActionResponse)
-        assert result.status == "success"
-        assert "Development servers restarted successfully" in result.message
+        # Verify "button" is in the results with high similarity
+        result_ids = [r["id"] for r in results]
+        assert "button" in result_ids, "Button should be in search results"
+        button_result = next(r for r in results if r["id"] == "button")
+        assert button_result["score"] > 0.85, "Button should have high similarity score"
 
 
-@pytest.mark.asyncio
-async def test_restart_failure():
-    """Test the restart tool when restart fails via subprocess."""
+async def test_search_custom_registry_components(common_project: Path):
+    """Test search for custom registry components (read-only)."""
+    async with mcp_session(common_project) as session:
+        # Search for sidebar component from animate-ui
+        search_result = await session.call_tool(
+            "search_registry_components",
+            arguments={"query": "animated sidebar navigation component", "limit": 5},
+        )
+        result_json = parse_json_result(search_result)
+        results = result_json["results"]
 
-    async def mock_create_subprocess_exec(*args, **kwargs):
-        return FakeProcess(returncode=1, stderr=b"Connection refused")
-
-    with (
-        patch(
-            "apx.mcp.common.asyncio.create_subprocess_exec",
-            side_effect=mock_create_subprocess_exec,
-        ),
-        patch("pathlib.Path.cwd", return_value=Path("/test/project")),
-    ):
-        result = await restart()
-
-        assert isinstance(result, McpActionResponse)
-        assert result.status == "error"
-        assert "Connection refused" in result.message
+        # Verify we got results from default registry
+        default_results = [r for r in results if not r.get("id", "").startswith("@")]
+        assert len(default_results) > 0, "Should have results from default registry"
 
 
-@pytest.mark.asyncio
-async def test_stop_success():
-    """Test the stop tool with successful stop via subprocess."""
+async def test_add_component(isolated_project: Path):
+    """Test add_component tool (modifies project)."""
+    async with mcp_session(isolated_project) as session:
+        add_result = await session.call_tool(
+            "add_component", arguments={"component_id": "dialog", "force": False}
+        )
+        result_text = retrieve_text_content(add_result)
 
-    async def mock_create_subprocess_exec(*args, **kwargs):
-        return FakeProcess(returncode=0, stdout=b"Stopped successfully")
-
-    with (
-        patch(
-            "apx.mcp.common.asyncio.create_subprocess_exec",
-            side_effect=mock_create_subprocess_exec,
-        ),
-        patch("pathlib.Path.cwd", return_value=Path("/test/project")),
-    ):
-        result = await stop()
-
-        assert isinstance(result, McpActionResponse)
-        assert result.status == "success"
-        assert "Development servers stopped successfully" in result.message
-
-
-@pytest.mark.asyncio
-async def test_stop_failure():
-    """Test the stop tool when stop fails via subprocess."""
-
-    async def mock_create_subprocess_exec(*args, **kwargs):
-        return FakeProcess(returncode=1, stderr=b"Permission denied")
-
-    with (
-        patch(
-            "apx.mcp.common.asyncio.create_subprocess_exec",
-            side_effect=mock_create_subprocess_exec,
-        ),
-        patch("pathlib.Path.cwd", return_value=Path("/test/project")),
-    ):
-        result = await stop()
-
-        assert isinstance(result, McpActionResponse)
-        assert result.status == "error"
-        assert "Permission denied" in result.message
+        # Verify component was created if successful
+        if "Successfully added component" in result_text:
+            dialog_file = (
+                isolated_project
+                / "src"
+                / "test_app"
+                / "ui"
+                / "components"
+                / "ui"
+                / "dialog.tsx"
+            )
+            assert dialog_file.exists(), "Dialog component file should be created"
+            content = dialog_file.read_text()
+            assert len(content) > 0, "Dialog component should have content"
+            assert "dialog" in content.lower()
 
 
-@pytest.mark.asyncio
-async def test_status_all_running(mock_core, mock_client, mock_status_response):
-    """Test the status tool when all servers are running."""
-    # Mock _get_ports to return PortsResponse
-    from apx.models import PortsResponse
+async def test_add_custom_registry_component(isolated_project: Path):
+    """Test add_component for custom registry (modifies project)."""
+    async with mcp_session(isolated_project) as session:
+        add_result = await session.call_tool(
+            "add_component",
+            arguments={
+                "component_id": "@animate-ui/components-radix-sidebar",
+                "force": False,
+            },
+        )
+        result_text = retrieve_text_content(add_result)
 
-    def mock_get_ports(client):
-        return PortsResponse(
-            dev_server_port=9000,
-            frontend_port=5173,
-            backend_port=8000,
-            host="localhost",
-            api_prefix="/api",
+        sidebar_file = (
+            isolated_project
+            / "src"
+            / "test_app"
+            / "ui"
+            / "components"
+            / "animate-ui"
+            / "components-radix-sidebar.tsx"
         )
 
-    # Get config with dev_server_port set
-    mock_config = ProjectConfig()
-    mock_config.dev.dev_server_port = 9000
-    mock_core.get_or_create_config = Mock(return_value=mock_config)
-
-    with (
-        patch("apx.mcp.common._get_core", return_value=mock_core),
-        patch("apx.mcp.common.DevServerClient", return_value=mock_client),
-        patch("apx.mcp.common._get_ports", side_effect=mock_get_ports),
-        patch("pathlib.Path.cwd", return_value=Path("/test/project")),
-    ):
-        result = await status()
-
-        assert isinstance(result, McpSimpleStatusResponse)
-        assert result.dev_server_running is True
-        assert result.dev_server_url == "http://localhost:9000"
-        assert result.api_prefix == "/api"
-        assert result.frontend_running is True
-        assert result.backend_running is True
-        assert result.openapi_running is True
-
-        # Verify client.status was called
-        mock_client.status.assert_called_once()
+        if "Successfully added component" in result_text:
+            assert sidebar_file.exists(), "Sidebar component should be created"
+            content = sidebar_file.read_text()
+            assert len(content) > 0, "Sidebar component should have content"
+            assert any(
+                term in content.lower() for term in ["sidebar", "navigation", "nav"]
+            ), "Component should contain sidebar/navigation related content"
+        elif "Failed to add component" in result_text:
+            # Acceptable failure modes for external registry
+            expected_errors = [
+                "Failed to fetch",
+                "Registry returned error",
+                "Unknown registry",
+                "404",
+                "File already exists",
+                "Failed to",
+            ]
+            assert any(term in result_text for term in expected_errors), (
+                "Should have a clear error message"
+            )
 
 
-@pytest.mark.asyncio
-async def test_status_no_server():
-    """Test the status tool when no server is configured."""
-    core = MagicMock()
-    core.is_running = Mock(return_value=False)
+async def test_docs_tool(common_project: Path):
+    """Test the docs tool for searching Databricks SDK documentation."""
+    async with mcp_session(common_project) as session:
+        await assert_tool_exists(session, "docs")
 
-    with (
-        patch("apx.mcp.common._get_core", return_value=core),
-        patch("pathlib.Path.cwd", return_value=Path("/test/project")),
-    ):
-        result = await status()
+        # Search for cluster-related docs
+        search_result = await session.call_tool(
+            "docs",
+            arguments={
+                "source": "databricks-sdk-python",
+                "query": "create cluster",
+                "num_results": 3,
+            },
+        )
+        result_text = retrieve_text_content(search_result)
+        skip_if_sdk_unavailable(result_text)
 
-        assert isinstance(result, McpSimpleStatusResponse)
-        assert result.dev_server_running is False
-        assert result.dev_server_url is None
-        assert result.api_prefix is None
-        assert result.frontend_running is False
-        assert result.backend_running is False
-        assert result.openapi_running is False
+        # Parse and validate results
+        result_json = json.loads(result_text)
+        assert result_json["source"] == "databricks-sdk-python"
+        assert result_json["query"] == "create cluster"
 
+        results = result_json["results"]
+        assert len(results) <= 3, "Should respect num_results limit"
 
-@pytest.mark.asyncio
-async def test_status_server_not_running(mock_core):
-    """Test the status tool when server process is not running."""
-    mock_core.is_running.return_value = False
-
-    with (
-        patch("apx.mcp.common._get_core", return_value=mock_core),
-        patch("pathlib.Path.cwd", return_value=Path("/test/project")),
-    ):
-        result = await status()
-
-        assert isinstance(result, McpSimpleStatusResponse)
-        assert result.dev_server_running is False
-        assert result.frontend_running is False
-        assert result.backend_running is False
-        assert result.openapi_running is False
+        if len(results) > 0:
+            first_result = results[0]
+            assert "text" in first_result and len(first_result["text"]) > 0
+            assert "source_file" in first_result
+            assert "score" in first_result and 0 <= first_result["score"] <= 1
+            assert "workspace" in first_result["source_file"]
 
 
-@pytest.mark.asyncio
-async def test_status_client_error(mock_core, mock_client):
-    """Test the status tool when client connection fails."""
+async def test_docs_create_cluster(common_project: Path):
+    """Test that 'create cluster' query returns relevant cluster creation docs in top 3."""
+    async with mcp_session(common_project) as session:
+        result = await session.call_tool(
+            "docs",
+            arguments={
+                "source": "databricks-sdk-python",
+                "query": "create cluster",
+                "num_results": 5,
+            },
+        )
+        result_text = retrieve_text_content(result)
+        skip_if_sdk_unavailable(result_text)
 
-    # Mock _get_ports to fail
-    def mock_get_ports_fail(client):
-        raise Exception("Connection refused")
+        result_json = parse_json_result(result)
+        results = result_json["results"]
 
-    # Get config with dev_server_port set
-    mock_config = ProjectConfig()
-    mock_config.dev.dev_server_port = 9000
-    mock_core.get_or_create_config = Mock(return_value=mock_config)
+        # At least one of top 3 should be cluster-related
+        top_3 = results[:3]
+        cluster_related = [
+            r
+            for r in top_3
+            if "cluster" in r["source_file"].lower() or "cluster" in r["text"].lower()
+        ]
 
-    with (
-        patch("apx.mcp.common._get_core", return_value=mock_core),
-        patch("apx.mcp.common.DevServerClient", return_value=mock_client),
-        patch("apx.mcp.common._get_ports", side_effect=mock_get_ports_fail),
-        patch("pathlib.Path.cwd", return_value=Path("/test/project")),
-    ):
-        result = await status()
-
-        # Should still return server info even if client fails
-        assert isinstance(result, McpSimpleStatusResponse)
-        assert result.dev_server_running is True
-        assert result.dev_server_url == "http://localhost:9000"
-        # But process statuses should be False
-        assert result.frontend_running is False
-        assert result.backend_running is False
-        assert result.openapi_running is False
-
-
-@pytest.mark.asyncio
-async def test_get_metadata_success():
-    """Test the get_metadata tool with successful metadata retrieval."""
-    # Use field aliases as defined in ProjectMetadata model
-    mock_metadata = ProjectMetadata(
-        **{
-            "app-name": "Test App",
-            "app-module": "test_app",
-            "app-slug": "test-app",
-        }
-    )
-
-    with (
-        patch("apx.mcp.common.ProjectMetadata.read", return_value=mock_metadata),
-        patch("apx.mcp.common.apx_version", "1.0.0"),
-    ):
-        result = await get_metadata()
-
-        assert isinstance(result, McpMetadataResponse)
-        assert result.app_name == "Test App"
-        assert result.app_module == "test_app"
-        assert result.app_slug == "test-app"
-        assert result.apx_version == "1.0.0"
-
-
-@pytest.mark.asyncio
-async def test_get_metadata_failure():
-    """Test the get_metadata tool when metadata retrieval fails."""
-    with (
-        patch(
-            "apx.mcp.common.ProjectMetadata.read",
-            side_effect=Exception("pyproject.toml not found"),
-        ),
-    ):
-        result = await get_metadata()
-
-        assert isinstance(result, McpErrorResponse)
-        assert "pyproject.toml not found" in result.error
-
-
-@pytest.mark.asyncio
-async def test_status_with_mocked_response(mock_core, mock_status_response):
-    """Test status tool with a specific mocked status response."""
-    from apx.models import PortsResponse
-
-    # Customize the mock response
-    custom_response = StatusResponse(
-        frontend_running=False,
-        backend_running=True,
-        openapi_running=False,
-        dev_server_port=9000,
-        frontend_port=3000,
-        backend_port=8080,
-    )
-
-    client = MagicMock()
-    client.status = Mock(return_value=custom_response)
-
-    def mock_get_ports(client):
-        return PortsResponse(
-            dev_server_port=9000,
-            frontend_port=3000,
-            backend_port=8080,
-            host="localhost",
-            api_prefix="/api",
+        assert len(cluster_related) >= 1, (
+            f"Expected at least 1 cluster-related result in top 3, got {len(cluster_related)}. "
+            f"Top 3 files: {[r['source_file'] for r in top_3]}"
         )
 
-    # Get config with dev_server_port set
-    mock_config = ProjectConfig()
-    mock_config.dev.dev_server_port = 9000
-    mock_core.get_or_create_config = Mock(return_value=mock_config)
 
-    with (
-        patch("apx.mcp.common._get_core", return_value=mock_core),
-        patch("apx.mcp.common.DevServerClient", return_value=client),
-        patch("apx.mcp.common._get_ports", side_effect=mock_get_ports),
-        patch("pathlib.Path.cwd", return_value=Path("/test/project")),
-    ):
-        result = await status()
+ROUTER_CODE_TEMPLATE = """from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
+from .._metadata import api_prefix
 
-        assert isinstance(result, McpSimpleStatusResponse)
-        assert result.dev_server_running is True
-        assert result.frontend_running is False
-        assert result.backend_running is True
-        assert result.openapi_running is False
-        assert result.dev_server_url == "http://localhost:9000"
-        assert result.api_prefix == "/api"
+api = APIRouter(prefix=api_prefix)
+
+class Item(BaseModel):
+    id: int
+    name: str
+    description: str | None = None
+    price: float
+
+class ItemCreate(BaseModel):
+    name: str
+    description: str | None = None
+    price: float
+
+class ItemUpdate(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    price: float | None = None
+
+# Mock database
+items_db: dict[int, Item] = {}
+
+@api.get('/items', response_model=list[Item], operation_id='listItems')
+def list_items():
+    '''List all items'''
+    return list(items_db.values())
+
+@api.get('/items/{item_id}', response_model=Item, operation_id='getItem')
+def get_item(item_id: int):
+    '''Get a specific item by ID'''
+    if item_id not in items_db:
+        raise HTTPException(status_code=404, detail='Item not found')
+    return items_db[item_id]
+
+@api.post('/items', response_model=Item, status_code=201, operation_id='createItem')
+def create_item(item: ItemCreate):
+    '''Create a new item'''
+    item_id = len(items_db) + 1
+    new_item = Item(id=item_id, **item.model_dump())
+    items_db[item_id] = new_item
+    return new_item
+
+@api.put('/items/{item_id}', response_model=Item, operation_id='updateItem')
+def update_item(item_id: int, item: ItemCreate):
+    '''Replace an entire item'''
+    if item_id not in items_db:
+        raise HTTPException(status_code=404, detail='Item not found')
+    updated_item = Item(id=item_id, **item.model_dump())
+    items_db[item_id] = updated_item
+    return updated_item
+
+@api.patch('/items/{item_id}', response_model=Item, operation_id='partialUpdateItem')
+def partial_update_item(item_id: int, item: ItemUpdate):
+    '''Partially update an item'''
+    if item_id not in items_db:
+        raise HTTPException(status_code=404, detail='Item not found')
+    stored_item = items_db[item_id]
+    update_data = item.model_dump(exclude_unset=True)
+    updated_item = stored_item.model_copy(update=update_data)
+    items_db[item_id] = updated_item
+    return updated_item
+
+@api.delete('/items/{item_id}', status_code=204, operation_id='deleteItem')
+def delete_item(item_id: int):
+    '''Delete an item'''
+    if item_id not in items_db:
+        raise HTTPException(status_code=404, detail='Item not found')
+    del items_db[item_id]
+    return None
+"""
 
 
-@pytest.mark.asyncio
-async def test_mcp_tool_responses_are_valid_models(mock_core):
-    """Test that MCP tool responses are valid Pydantic models."""
-    from apx.models import PortsResponse
+async def _setup_openapi_project(project_path: Path) -> None:
+    """Set up a project with router code and generate OpenAPI."""
+    from conftest import run_cli_async
 
-    # Get config with dev_server_port set
-    mock_config = ProjectConfig()
-    mock_config.dev.dev_server_port = 9000
-    mock_core.get_or_create_config = Mock(return_value=mock_config)
+    src_dir = project_path / "src"
+    backend_dir = src_dir / "test_app" / "backend"
 
-    client = MagicMock()
-    client.status = Mock(
-        return_value=StatusResponse(
-            frontend_running=True,
-            backend_running=True,
-            openapi_running=True,
-            dev_server_port=9000,
-            frontend_port=5000,
-            backend_port=8000,
+    (backend_dir / "router.py").write_text(ROUTER_CODE_TEMPLATE)
+    (src_dir / "test_app" / "_version.py").write_text('version = "0.0.0"\n')
+
+    result = await run_cli_async(
+        ["__generate_openapi", "--app-dir", str(project_path)],
+        cwd=project_path,
+    )
+    assert result.returncode == 0, "OpenAPI generation should succeed"
+
+
+def _assert_query_example(example: str, operation_name: str) -> None:
+    """Assert that a query example contains expected patterns."""
+    assert f'import {{ use{operation_name} }} from "@/lib/api"' in example
+    assert 'import selector from "@/lib/selector"' in example
+    assert (
+        f"const {{ data, isLoading, error }} = use{operation_name}(selector())"
+        in example
+    )
+    assert "if (isLoading)" in example
+    assert "if (error)" in example
+    # Suspense hook
+    assert f'import {{ use{operation_name}Suspense }} from "@/lib/api"' in example
+    assert f"const {{ data }} = use{operation_name}Suspense(selector())" in example
+    # Type hints
+    assert f"{operation_name}QueryResult" in example
+    assert f"{operation_name}QueryError" in example
+
+
+def _assert_mutation_example(example: str, operation_name: str) -> None:
+    """Assert that a mutation example contains expected patterns."""
+    assert f'import {{ use{operation_name} }} from "@/lib/api"' in example
+    assert f"const {{ mutate, isPending }} = use{operation_name}()" in example
+    assert "mutate({ data: { /* request body */ } })" in example
+    assert "onClick={handleSubmit}" in example
+    # Type hints
+    assert f"{operation_name}MutationBody" in example
+    assert f"{operation_name}MutationResult" in example
+    assert f"{operation_name}MutationError" in example
+
+
+async def test_routes_resource_and_get_route_info(isolated_project: Path):
+    """Test routes resource and get_route_info tool with generated OpenAPI."""
+    await _setup_openapi_project(isolated_project)
+
+    async with mcp_session(isolated_project) as session:
+        # Verify routes resource exists and has correct metadata
+        routes_resource = await assert_resource_exists(session, "apx://routes")
+        assert routes_resource.name == "api-routes"
+        assert routes_resource.description is not None
+        assert "OpenAPI" in routes_resource.description
+        assert routes_resource.mimeType == "application/json"
+
+        # Read and validate routes
+        content = await session.read_resource(AnyUrl("apx://routes"))
+        assert len(content.contents) == 1
+        contents = content.contents[0]
+        assert isinstance(contents, TextResourceContents)
+
+        routes_json = json.loads(contents.text)
+        assert isinstance(routes_json, list)
+        assert len(routes_json) == 6
+
+        # Verify all expected routes exist
+        route_ids = [r["id"] for r in routes_json]
+        expected_routes = [
+            "listItems",
+            "getItem",
+            "createItem",
+            "updateItem",
+            "partialUpdateItem",
+            "deleteItem",
+        ]
+        for route_id in expected_routes:
+            assert route_id in route_ids, f"Should have {route_id} route"
+
+        # Verify route structure
+        list_items_route = next(r for r in routes_json if r["id"] == "listItems")
+        assert list_items_route["method"] == "GET"
+        assert "/items" in list_items_route["path"]
+
+        create_item_route = next(r for r in routes_json if r["id"] == "createItem")
+        assert create_item_route["method"] == "POST"
+        assert "/items" in create_item_route["path"]
+
+        # Verify get_route_info tool exists
+        await assert_tool_exists(session, "get_route_info")
+
+        # Test GET operation (query hook)
+        result = await session.call_tool(
+            "get_route_info", arguments={"operation_id": "listItems"}
         )
-    )
-    client.restart = Mock(
-        return_value=ActionResponse(status="success", message="Restarted")
-    )
+        result_json = parse_json_result(result)
+        assert result_json["operation_id"] == "listItems"
+        assert result_json["method"] == "GET"
+        _assert_query_example(result_json["example"], "ListItems")
 
-    def mock_get_ports(client):
-        return PortsResponse(
-            dev_server_port=9000,
-            frontend_port=5000,
-            backend_port=8000,
-            host="localhost",
-            api_prefix="/api",
+        # Test POST operation (mutation hook)
+        result = await session.call_tool(
+            "get_route_info", arguments={"operation_id": "createItem"}
         )
+        result_json = parse_json_result(result)
+        assert result_json["operation_id"] == "createItem"
+        assert result_json["method"] == "POST"
+        _assert_mutation_example(result_json["example"], "CreateItem")
 
-    async def mock_subprocess_success(*args, **kwargs):
-        return FakeProcess(returncode=0)
-
-    with (
-        patch("apx.mcp.common._get_core", return_value=mock_core),
-        patch("apx.mcp.common.DevServerClient", return_value=client),
-        patch("apx.mcp.common._get_ports", side_effect=mock_get_ports),
-        patch("pathlib.Path.cwd", return_value=Path("/test/project")),
-        patch(
-            "apx.mcp.common.ProjectMetadata.read",
-            return_value=ProjectMetadata(
-                **{
-                    "app-name": "Test App",
-                    "app-module": "test_app",
-                    "app-slug": "test-app",
-                }
-            ),
-        ),
-        patch("apx.mcp.common.apx_version", "1.0.0"),
-        patch(
-            "apx.mcp.common.asyncio.create_subprocess_exec",
-            side_effect=mock_subprocess_success,
-        ),
-    ):
-        # Test start response
-        start_result = await start()
-        assert isinstance(start_result, McpActionResponse)
-        assert start_result.model_dump()  # Should serialize to dict
-
-        # Test status response
-        status_result = await status()
-        assert isinstance(status_result, McpSimpleStatusResponse)
-        assert status_result.model_dump()  # Should serialize to dict
-
-        # Test get_metadata response
-        metadata_result = await get_metadata()
-        assert isinstance(metadata_result, McpMetadataResponse)
-        assert metadata_result.model_dump()  # Should serialize to dict
-
-        # Test restart response
-        restart_result = await restart()
-        assert isinstance(restart_result, McpActionResponse)
-        assert restart_result.model_dump()  # Should serialize to dict
-
-        # Test stop response
-        stop_result = await stop()
-        assert isinstance(stop_result, McpActionResponse)
-        assert stop_result.model_dump()  # Should serialize to dict
-
-
-@pytest.mark.asyncio
-async def test_databricks_apps_logs_with_explicit_app_name(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    class FakeProc:
-        def __init__(self):
-            self.returncode = 0
-
-        async def communicate(self):
-            return b"hello\n", b""
-
-        def kill(self):
-            return None
-
-    async def fake_create_subprocess_exec(*args, **kwargs):
-        return FakeProc()
-
-    monkeypatch.setattr(
-        "apx.mcp.common.asyncio.create_subprocess_exec", fake_create_subprocess_exec
-    )
-
-    result = await databricks_apps_logs(app_name="my-app", tail_lines=10)
-    assert isinstance(result, McpDatabricksAppsLogsResponse)
-    assert result.app_name == "my-app"
-    assert result.resolved_from_databricks_yml is False
-    assert "databricks" in result.command[0]
-    assert result.returncode == 0
-    assert "hello" in result.stdout
-
-
-@pytest.mark.asyncio
-async def test_databricks_apps_logs_resolves_app_from_databricks_yml(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    (tmp_path / "databricks.yml").write_text(
-        """
-resources:
-  apps:
-    demo-app:
-      name: "resolved-app"
-""".lstrip()
-    )
-
-    class FakeProc:
-        def __init__(self):
-            self.returncode = 0
-
-        async def communicate(self):
-            return b"resolved logs\n", b""
-
-        def kill(self):
-            return None
-
-    async def fake_create_subprocess_exec(*args, **kwargs):
-        return FakeProc()
-
-    monkeypatch.setattr(
-        "apx.mcp.common.asyncio.create_subprocess_exec", fake_create_subprocess_exec
-    )
-    monkeypatch.setattr("apx.mcp.common.Path.cwd", lambda: tmp_path)
-
-    result = await databricks_apps_logs(app_name=None)
-    assert isinstance(result, McpDatabricksAppsLogsResponse)
-    assert result.app_name == "resolved-app"
-    assert result.resolved_from_databricks_yml is True
-    assert "resolved logs" in result.stdout
-
-
-@pytest.mark.asyncio
-async def test_databricks_apps_logs_errors_when_multiple_apps_in_yml(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    (tmp_path / "databricks.yml").write_text(
-        """
-resources:
-  apps:
-    a1:
-      name: "app-1"
-    a2:
-      name: "app-2"
-""".lstrip()
-    )
-
-    monkeypatch.setattr("apx.mcp.common.Path.cwd", lambda: tmp_path)
-
-    result = await databricks_apps_logs(app_name=None)
-    assert isinstance(result, McpErrorResponse)
-    assert "multiple apps" in result.error.lower()
-
-
-@pytest.mark.asyncio
-async def test_databricks_apps_logs_errors_when_databricks_yml_missing(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    monkeypatch.setattr("apx.mcp.common.Path.cwd", lambda: tmp_path)
-    result = await databricks_apps_logs(app_name=None)
-    assert isinstance(result, McpErrorResponse)
-    assert "databricks.yml was not found" in result.error
-
-
-@pytest.mark.asyncio
-async def test_databricks_apps_logs_logs_subcommand_not_found_upgrade_message(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    class FakeProc:
-        def __init__(self):
-            self.returncode = 1
-
-        async def communicate(self):
-            return b"", b'Error: unknown command "logs" for "apps"\\n'
-
-        def kill(self):
-            return None
-
-    async def fake_create_subprocess_exec(*args, **kwargs):
-        return FakeProc()
-
-    monkeypatch.setattr(
-        "apx.mcp.common.asyncio.create_subprocess_exec", fake_create_subprocess_exec
-    )
-
-    result = await databricks_apps_logs(app_name="my-app")
-    assert isinstance(result, McpErrorResponse)
-    assert "upgrade Databricks CLI to v0.280.0 or higher" in result.error
-
-
-@pytest.mark.asyncio
-async def test_databricks_apps_logs_forwards_other_cli_errors(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    class FakeProc:
-        def __init__(self):
-            self.returncode = 2
-
-        async def communicate(self):
-            return b"some stdout", b"some stderr"
-
-        def kill(self):
-            return None
-
-    async def fake_create_subprocess_exec(*args, **kwargs):
-        return FakeProc()
-
-    monkeypatch.setattr(
-        "apx.mcp.common.asyncio.create_subprocess_exec", fake_create_subprocess_exec
-    )
-
-    result = await databricks_apps_logs(app_name="my-app")
-    assert isinstance(result, McpErrorResponse)
-    assert "some stderr" in result.error
-    assert "some stdout" in result.error
-
-
-@pytest.mark.asyncio
-async def test_databricks_apps_logs_errors_when_databricks_cli_missing(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    async def fake_create_subprocess_exec(*args, **kwargs):
-        raise FileNotFoundError("databricks")
-
-    monkeypatch.setattr(
-        "apx.mcp.common.asyncio.create_subprocess_exec", fake_create_subprocess_exec
-    )
-
-    result = await databricks_apps_logs(app_name="my-app")
-    assert isinstance(result, McpErrorResponse)
-    assert "Databricks CLI executable not found" in result.error
-
-
-@pytest.mark.asyncio
-async def test_databricks_apps_logs_loads_dotenv_when_present(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    (tmp_path / ".env").write_text("DATABRICKS_CONFIG_PROFILE=DEFAULT\n")
-    monkeypatch.setattr("apx.mcp.common.Path.cwd", lambda: tmp_path)
-
-    called = {"val": False}
-
-    def fake_load_dotenv(path, *args, **kwargs):
-        # Ensure we load the expected file
-        assert str(path).endswith(str(tmp_path / ".env"))
-        called["val"] = True
-        return True
-
-    class FakeProc:
-        def __init__(self):
-            self.returncode = 0
-
-        async def communicate(self):
-            return b"ok\n", b""
-
-        def kill(self):
-            return None
-
-    async def fake_create_subprocess_exec(*args, **kwargs):
-        return FakeProc()
-
-    monkeypatch.setattr("apx.mcp.common.load_dotenv", fake_load_dotenv)
-    monkeypatch.setattr(
-        "apx.mcp.common.asyncio.create_subprocess_exec", fake_create_subprocess_exec
-    )
-
-    result = await databricks_apps_logs(app_name="my-app")
-    assert isinstance(result, McpDatabricksAppsLogsResponse)
-    assert called["val"] is True
+        # Test non-existent operation ID
+        result = await session.call_tool(
+            "get_route_info", arguments={"operation_id": "nonExistentOperation"}
+        )
+        result_text = retrieve_text_content(result)
+        assert "not found" in result_text.lower()

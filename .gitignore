@@ -35,5 +35,18 @@ htmlcov/
 !src/apx/templates/base/.apx/
 src/apx/templates/base/.apx/*
 !src/apx/templates/base/.apx/plugin.ts
+src/apx/binaries/*
 
 experiments/
+target/
+
+*.so
+
+.bins/
+.uv-cache/
+
+.cursor/plans
+
+/assets/models
+.reports
+.pages
