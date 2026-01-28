@@ -78,35 +78,35 @@ jobs:
           name: wheels-${{ matrix.os }}
           path: dist/*.whl
 
-  create-release:
-    name: Create GitHub Release
-    needs: build-wheels
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
+  # create-release:
+  #   name: Create GitHub Release
+  #   needs: build-wheels
+  #   runs-on: ubuntu-latest
+  #   permissions:
+  #     contents: write
 
-    steps:
-      - uses: actions/checkout@v4
+  #   steps:
+  #     - uses: actions/checkout@v4
 
-      - name: Download wheels
-        uses: actions/download-artifact@v4
-        with:
-          path: dist
-          pattern: wheels-*
-          merge-multiple: true
+  #     - name: Download wheels
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         path: dist
+  #         pattern: wheels-*
+  #         merge-multiple: true
 
-      - name: Create release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.ref_name }}
-          files: dist/*.whl
-          generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  #     - name: Create release
+  #       uses: softprops/action-gh-release@v2
+  #       with:
+  #         tag_name: ${{ github.ref_name }}
+  #         files: dist/*.whl
+  #         generate_release_notes: true
+  #       env:
+  #         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   deploy-registry:
     name: Deploy registry to Pages
-    needs: create-release
+    # needs: create-release
     runs-on: ubuntu-latest
 
     steps:
