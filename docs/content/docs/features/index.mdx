@@ -259,7 +259,7 @@ def create_order(order: Order):
 | Environment | Database | Configuration                     |
 | ----------- | -------- | --------------------------------- |
 | Development | PGlite   | In-memory PostgreSQL sidecar      |
-| Production  | Lakebase | Configured via Databricks profile |
+| Production  | Lakebase | Configured via `PGAPPNAME` environment variable inside Apps runtime |
 
 The same SQLModel code works in both environments - apx handles the connection configuration automatically. Since PGlite is PostgreSQL-compatible, you get the same SQL behavior in development as you will in production.
 
