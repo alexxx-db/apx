@@ -15,9 +15,7 @@ env:
 
 jobs:
   test:
-    runs-on:
-      group: databricks-solutions-protected-runner-group
-      labels: ubuntu-latest
+    runs-on: linux-ubuntu-latest
 
     steps:
       - name: Checkout code
