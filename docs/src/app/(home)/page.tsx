@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 import {
   Terminal,
   Server,
@@ -40,9 +41,11 @@ export default function HomePage() {
       <section className="flex flex-col items-center justify-center px-6 py-16 md:py-24 text-center">
         {/* Logo */}
         <div className="mb-8">
-          <img
+          <Image
             src="/logo.svg"
             alt="apx logo"
+            width={128}
+            height={128}
             className="w-24 h-24 md:w-32 md:h-32 rounded-2xl shadow-lg"
           />
         </div>

@@ -7,6 +7,7 @@ const config = {
   output: "export",
   distDir: "../.pages",
   reactStrictMode: true,
+  basePath: "/apx",
 };
 
 export default withMDX(config);
