@@ -127,12 +127,6 @@ jobs:
           sccache: true
           docker-options: >-
             -v ${{ github.workspace }}/.protoc:/protoc
-            -v ~/.cargo/registry/index/:/root/.cargo/registry/index/
-            -v ~/.cargo/registry/cache/:/root/.cargo/registry/cache/
-            -v ~/.cargo/git/db/:/root/.cargo/git/db/
-            -e PROTOC=/protoc/bin/protoc
-            -e ACTIONS_CACHE_URL
-            -e ACTIONS_RUNTIME_TOKEN
 
   #     - name: Build wheels (macOS/Windows)
   #       if: runner.os != 'Linux'
