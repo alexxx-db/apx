@@ -56,6 +56,20 @@ jobs:
         with:
           enable-cache: true
 
+      # ============================================
+      # Cache Cargo dependencies
+      # ============================================
+      - name: Cache Cargo registry
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.target }}-cargo-
+
       - uses: actions/setup-python@v6
         with:
           python-version-file: ".python-version"
@@ -109,10 +123,16 @@ jobs:
           target: ${{ matrix.target }}
           args: --release --out dist --compression-level 9
           manylinux: ${{ matrix.manylinux }}
+          rust-toolchain: "1.88.0"
           sccache: true
-          # Mount .protoc into Docker container and set PROTOC env var
-          # This makes the cached protoc available inside manylinux container
-          docker-options: -v ${{ github.workspace }}/.protoc:/protoc -e PROTOC=/protoc/bin/protoc
+          docker-options: >-
+            -v ${{ github.workspace }}/.protoc:/protoc
+            -v ~/.cargo/registry/index/:/root/.cargo/registry/index/
+            -v ~/.cargo/registry/cache/:/root/.cargo/registry/cache/
+            -v ~/.cargo/git/db/:/root/.cargo/git/db/
+            -e PROTOC=/protoc/bin/protoc
+            -e ACTIONS_CACHE_URL
+            -e ACTIONS_RUNTIME_TOKEN
 
   #     - name: Build wheels (macOS/Windows)
   #       if: runner.os != 'Linux'
@@ -120,6 +140,7 @@ jobs:
   #       with:
   #         target: ${{ matrix.target }}
   #         args: --release --out dist --compression-level 9
+  #         rust-toolchain: "1.88.0"
   #         sccache: true
   #         # Protoc already in PATH from setup step, PROTOC env var set
 
