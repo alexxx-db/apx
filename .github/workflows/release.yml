@@ -27,26 +27,26 @@ jobs:
             platform: linux
             manylinux: "2_28"
 
-          # # Linux aarch64
-          # - os: linux-ubuntu-latest
-          #   target: aarch64
-          #   platform: linux
-          #   manylinux: "2_28"
+          # Linux aarch64
+          - os: linux-ubuntu-latest
+            target: aarch64
+            platform: linux
+            manylinux: "2_28"
 
-          # # macOS x86_64 (Intel)
-          # - os: macos-15-intel
-          #   target: x86_64-apple-darwin
-          #   platform: macos
+          # macOS x86_64 (Intel)
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            platform: macos
 
-          # # macOS aarch64 (Apple Silicon)
-          # - os: macos-latest
-          #   target: aarch64-apple-darwin
-          #   platform: macos
+          # macOS aarch64 (Apple Silicon)
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            platform: macos
 
-          # # Windows x64
-          # - os: windows-latest
-          #   target: x64
-          #   platform: windows
+          # Windows x64
+          - os: windows-latest
+            target: x64
+            platform: windows
 
     steps:
       - uses: actions/checkout@v6
@@ -128,62 +128,62 @@ jobs:
           docker-options: >-
             -v ${{ github.workspace }}/.protoc:/protoc
 
-  #     - name: Build wheels (macOS/Windows)
-  #       if: runner.os != 'Linux'
-  #       uses: PyO3/maturin-action@v1
-  #       with:
-  #         target: ${{ matrix.target }}
-  #         args: --release --out dist --compression-level 9
-  #         rust-toolchain: "1.88.0"
-  #         sccache: true
-  #         # Protoc already in PATH from setup step, PROTOC env var set
+      - name: Build wheels (macOS/Windows)
+        if: runner.os != 'Linux'
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          args: --release --out dist --compression-level 9
+          rust-toolchain: "1.88.0"
+          sccache: true
+          # Protoc already in PATH from setup step, PROTOC env var set
 
-  #     # ============================================
-  #     # Upload Artifacts
-  #     # ============================================
-  #     - name: Upload wheels
-  #       uses: actions/upload-artifact@v6
-  #       with:
-  #         name: wheels-${{ matrix.platform }}-${{ matrix.target }}
-  #         path: dist
+      # ============================================
+      # Upload Artifacts
+      # ============================================
+      - name: Upload wheels
+        uses: actions/upload-artifact@v6
+        with:
+          name: wheels-${{ matrix.platform }}-${{ matrix.target }}
+          path: dist
 
-  # # ============================================
-  # # Create GitHub Release
-  # # ============================================
-  # create-release:
-  #   name: Create GitHub Release
-  #   needs: build
-  #   runs-on: linux-ubuntu-latest
-  #   permissions:
-  #     contents: write
+  # ============================================
+  # Create GitHub Release
+  # ============================================
+  create-release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: linux-ubuntu-latest
+    permissions:
+      contents: write
 
-  #   steps:
-  #     - uses: actions/checkout@v6
+    steps:
+      - uses: actions/checkout@v6
 
-  #     - name: Download all artifacts
-  #       uses: actions/download-artifact@v6
-  #       with:
-  #         path: dist
-  #         pattern: wheels-*
-  #         merge-multiple: true
+      - name: Download all artifacts
+        uses: actions/download-artifact@v6
+        with:
+          path: dist
+          pattern: wheels-*
+          merge-multiple: true
 
-  #     - name: Create release
-  #       uses: softprops/action-gh-release@v2
-  #       with:
-  #         tag_name: ${{ github.ref_name }}
-  #         files: dist/*
-  #         generate_release_notes: true
-  #       env:
-  #         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: dist/*
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # # ============================================
-  # # Deploy registry
-  # # ============================================
-  # deploy-registry:
-  #   name: Deploy registry to Pages
-  #   needs: create-release
-  #   uses: ./.github/workflows/deploy-registry.yml
-  #   permissions:
-  #     contents: read
-  #     pages: write
-  #     id-token: write
+  # ============================================
+  # Deploy registry
+  # ============================================
+  deploy-registry:
+    name: Deploy registry to Pages
+    needs: create-release
+    uses: ./.github/workflows/deploy-registry.yml
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
