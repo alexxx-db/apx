@@ -3,9 +3,10 @@ use std::path::{Path, PathBuf};
 use tokio::process::Child;
 use tracing::debug;
 
-use crate::bun_binary_path;
 use crate::cli::run_cli_async;
-use crate::common::{read_project_metadata, write_metadata_file};
+use crate::common::{
+    BunCommand, ensure_entrypoint_deps, read_project_metadata, write_metadata_file,
+};
 
 use super::common::prepare_frontend_args;
 
@@ -77,10 +78,14 @@ pub async fn run_dev(app_dir: &Path) -> Result<Child, String> {
     let metadata = read_project_metadata(app_dir)?;
     write_metadata_file(app_dir, &metadata)?;
 
-    let (entrypoint, args, app_name) = prepare_frontend_args(app_dir, "dev")?;
-    let bun_path = bun_binary_path()?;
+    // Ensure entrypoint.ts dependencies are installed
+    ensure_entrypoint_deps(app_dir).await?;
 
-    let child = tokio::process::Command::new(&bun_path)
+    let (entrypoint, args, app_name) = prepare_frontend_args(app_dir, "dev")?;
+    let bun = BunCommand::new()?;
+
+    let child = bun
+        .tokio_command()
         .arg("run")
         .arg(&entrypoint)
         .args(&args)

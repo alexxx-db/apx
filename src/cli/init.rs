@@ -10,13 +10,13 @@ use tokio::process::Command;
 use tracing::debug;
 use walkdir::WalkDir;
 
-use crate::bun_binary_path;
 use crate::cli::components::add::{ComponentInput, add_components};
 use crate::cli::run_cli_async;
 use crate::common::list_profiles;
 use crate::common::{
-    bun_install, format_elapsed_ms, read_project_metadata, run_with_spinner,
-    run_with_spinner_async, spinner, write_metadata_file,
+    BunCommand, bun_install_streaming, format_elapsed_ms, multi_progress, multi_spinner,
+    read_project_metadata, run_command_streaming, run_with_spinner, run_with_spinner_async,
+    spinner, write_metadata_file,
 };
 use crate::dotenv::DotenvFile;
 use crate::interop::templates_dir;
@@ -113,8 +113,8 @@ async fn run_inner(mut args: InitArgs) -> Result<(), String> {
         return Err("uv is not installed. Please install uv to continue.".to_string());
     }
 
-    let bun_path = bun_binary_path()?;
-    if !bun_path.exists() {
+    let bun = BunCommand::new()?;
+    if !bun.exists() {
         return Err("bun is not installed. Please install bun to continue.".to_string());
     }
 
@@ -335,49 +335,63 @@ async fn run_inner(mut args: InitArgs) -> Result<(), String> {
         }
     }
 
-    let backend_task = if !args.skip_backend_dependencies {
-        let app_path = app_path.clone();
-        // if APX_DEV_PATH is set, use editable mode, otherwise use non-editable mode
-        let apx_editable = std::env::var("APX_DEV_PATH").is_ok();
-        Some(tokio::spawn(async move {
-            let install_args = if apx_editable {
-                // For editable mode, use APX_DEV_PATH  + check if is's a valid directory
-                let apx_path = std::env::var("APX_DEV_PATH").unwrap_or_else(|_| ".".to_string());
-                if !Path::new(&apx_path).is_dir() {
-                    return Err(format!(
-                        "APX_DEV_PATH is not a valid directory: {}",
-                        &apx_path
-                    ));
-                }
-                InstallArgs::Editable {
-                    path: PathBuf::from(apx_path),
-                }
-            } else {
-                // For non-editable mode, install from registry using current package version
-                InstallArgs::Standard {
-                    version: env!("CARGO_PKG_VERSION").to_string(),
-                }
-            };
-            setup_backend(&app_path, install_args).await
-        }))
-    } else {
-        None
-    };
-
-    let frontend_task = if !args.skip_frontend_dependencies {
-        let app_path = app_path.clone();
-        let bun_path = bun_path.clone();
-        Some(tokio::spawn(async move {
-            bun_install(&app_path, &bun_path).await
-        }))
-    } else {
-        None
-    };
-
-    if backend_task.is_some() || frontend_task.is_some() {
-        let spinner = spinner("📦 Installing dependencies...");
+    // Install dependencies with real-time progress display
+    if !args.skip_backend_dependencies || !args.skip_frontend_dependencies {
+        let mp = multi_progress();
         let dependencies_start = Instant::now();
 
+        // Create spinners for each task
+        let backend_spinner = if !args.skip_backend_dependencies {
+            Some(multi_spinner(&mp, "🐍 Python: preparing..."))
+        } else {
+            None
+        };
+
+        let frontend_spinner = if !args.skip_frontend_dependencies {
+            Some(multi_spinner(&mp, "📦 Frontend: preparing..."))
+        } else {
+            None
+        };
+
+        // Spawn backend task
+        let backend_task = if let Some(spinner) = backend_spinner.clone() {
+            let app_path = app_path.clone();
+            let apx_editable = std::env::var("APX_DEV_PATH").is_ok();
+            Some(tokio::spawn(async move {
+                let install_args = if apx_editable {
+                    let apx_path =
+                        std::env::var("APX_DEV_PATH").unwrap_or_else(|_| ".".to_string());
+                    if !Path::new(&apx_path).is_dir() {
+                        return Err(format!(
+                            "APX_DEV_PATH is not a valid directory: {}",
+                            &apx_path
+                        ));
+                    }
+                    InstallArgs::Editable {
+                        path: PathBuf::from(apx_path),
+                    }
+                } else {
+                    InstallArgs::Standard {
+                        version: env!("CARGO_PKG_VERSION").to_string(),
+                    }
+                };
+                setup_backend_streaming(&app_path, install_args, &spinner).await
+            }))
+        } else {
+            None
+        };
+
+        // Spawn frontend task
+        let frontend_task = if let Some(spinner) = frontend_spinner.clone() {
+            let app_path = app_path.clone();
+            Some(tokio::spawn(async move {
+                bun_install_streaming(&app_path, &spinner).await
+            }))
+        } else {
+            None
+        };
+
+        // Wait for both tasks to complete
         let backend_result = if let Some(handle) = backend_task {
             Some(
                 handle
@@ -387,6 +401,7 @@ async fn run_inner(mut args: InitArgs) -> Result<(), String> {
         } else {
             None
         };
+
         let frontend_result = if let Some(handle) = frontend_task {
             Some(
                 handle
@@ -397,8 +412,23 @@ async fn run_inner(mut args: InitArgs) -> Result<(), String> {
             None
         };
 
-        spinner.finish_and_clear();
+        // Clear spinners and show final status
+        if let Some(spinner) = backend_spinner {
+            if backend_result.as_ref().is_some_and(|r| r.is_ok()) {
+                spinner.finish_with_message("🐍 Python: done");
+            } else {
+                spinner.finish_with_message("🐍 Python: failed");
+            }
+        }
+        if let Some(spinner) = frontend_spinner {
+            if frontend_result.as_ref().is_some_and(|r| r.is_ok()) {
+                spinner.finish_with_message("📦 Frontend: done");
+            } else {
+                spinner.finish_with_message("📦 Frontend: failed");
+            }
+        }
 
+        // Check for errors
         if let Some(Err(err)) = frontend_result {
             return Err(err);
         }
@@ -779,7 +809,14 @@ pub fn configure_editable_apx(pyproject: &Path, apx_path: &Path) -> Result<(), S
     Ok(())
 }
 
-async fn setup_backend(app_path: &Path, install_args: InstallArgs) -> Result<(), String> {
+use indicatif::ProgressBar;
+
+/// Backend setup with streaming output to a progress bar.
+async fn setup_backend_streaming(
+    app_path: &Path,
+    install_args: InstallArgs,
+    spinner: &ProgressBar,
+) -> Result<(), String> {
     generate_metadata_file(app_path)?;
 
     let pyproject_path = app_path.join("pyproject.toml");
@@ -789,16 +826,18 @@ async fn setup_backend(app_path: &Path, install_args: InstallArgs) -> Result<(),
             ensure_apx_uv_config(&pyproject_path)?;
             let versioned_package = format!("apx=={version}");
 
+            spinner.set_message("🐍 Python: adding apx package...");
+
             let mut add_cmd = Command::new("uv");
             add_cmd
                 .arg("add")
                 .arg("--dev")
                 .arg(versioned_package)
                 .current_dir(app_path);
-            run_command(&mut add_cmd, "Failed to add apx package").await?;
+
+            run_command_streaming(add_cmd, spinner, "🐍 uv:", "Failed to add apx package").await?;
         }
         InstallArgs::Editable { path } => {
-            // editable path must be an existing local path
             debug!("Setting up editable apx installation");
             debug!("  app_path: {}", app_path.display());
             debug!("  editable path: {}", path.display());
@@ -810,15 +849,16 @@ async fn setup_backend(app_path: &Path, install_args: InstallArgs) -> Result<(),
                 ));
             }
 
-            // Configure pyproject.toml with editable source
             configure_editable_apx(&pyproject_path, &path)?;
             debug!("pyproject.toml configured for editable apx");
 
-            // Run uv sync to install dependencies
-            debug!("Running uv sync");
+            spinner.set_message("🐍 Python: syncing dependencies...");
+
             let mut sync_cmd = Command::new("uv");
             sync_cmd.arg("sync").current_dir(app_path);
-            run_command(&mut sync_cmd, "Failed to sync dependencies").await?;
+
+            run_command_streaming(sync_cmd, spinner, "🐍 uv:", "Failed to sync dependencies")
+                .await?;
             debug!("uv sync completed successfully");
         }
     }

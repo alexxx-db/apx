@@ -2,10 +2,9 @@ use clap::Args;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
-use tokio::process::Command;
 
-use crate::common::{format_elapsed_ms, read_project_metadata, spinner};
-use crate::{bun_binary_path, cli::run_cli_async};
+use crate::cli::run_cli_async;
+use crate::common::{BunCommand, format_elapsed_ms, read_project_metadata, spinner};
 
 use super::cache::sync_registry_indexes;
 use super::{
@@ -350,8 +349,9 @@ async fn bun_add(app_dir: &Path, deps: &[String]) -> Result<(), String> {
         return Ok(());
     }
 
-    let bun_path = bun_binary_path()?;
-    let output = Command::new(bun_path)
+    let bun = BunCommand::new()?;
+    let output = bun
+        .tokio_command()
         .arg("add")
         .args(deps)
         .current_dir(app_dir)

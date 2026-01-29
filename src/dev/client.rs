@@ -85,6 +85,8 @@ pub struct StatusResponse {
     pub frontend_status: String,
     pub backend_status: String,
     pub db_status: String,
+    /// True if any critical process (frontend/backend) has permanently failed and cannot recover
+    pub failed: bool,
 }
 
 fn build_client() -> Result<reqwest::Client, String> {

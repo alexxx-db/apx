@@ -20,8 +20,7 @@ use tracing::{debug, info, warn};
 
 use reqwest;
 
-use crate::bun_binary_path;
-use crate::common::{ApxCommand, UvCommand, handle_spawn_error, read_project_metadata};
+use crate::common::{ApxCommand, BunCommand, UvCommand, handle_spawn_error, read_project_metadata};
 use crate::dev::common::CLIENT_HOST;
 use crate::dev::otel::forward_log_to_flux;
 use crate::dotenv::DotenvFile;
@@ -131,9 +130,9 @@ impl ProcessManager {
         tokio::spawn(async move {
             // 1. DB (non-critical) - warn on failure but continue
             debug!("Starting PGlite database process...");
-            match Self::ensure_bun_path() {
-                Ok(bun_path) => {
-                    if let Err(e) = pm.spawn_pglite(&bun_path).await {
+            match Self::ensure_bun() {
+                Ok(bun) => {
+                    if let Err(e) = pm.spawn_pglite(&bun).await {
                         warn!(
                             "⚠️ Failed to start PGlite database: {}. Continuing without DB.",
                             e
@@ -444,11 +443,11 @@ impl ProcessManager {
         Ok(config_path.display().to_string())
     }
 
-    async fn spawn_pglite(&self, bun_path: &Path) -> Result<(), String> {
+    async fn spawn_pglite(&self, bun: &BunCommand) -> Result<(), String> {
         let child = self
             .spawn_process(
                 &self.app_dir,
-                bun_path.to_path_buf(),
+                bun.path().to_path_buf(),
                 vec![
                     "x".to_string(),
                     "@electric-sql/pglite-socket".to_string(),
@@ -906,12 +905,12 @@ impl ProcessManager {
         }
     }
 
-    fn ensure_bun_path() -> Result<PathBuf, String> {
-        let bun_path = bun_binary_path()?;
-        if !bun_path.exists() {
+    fn ensure_bun() -> Result<BunCommand, String> {
+        let bun = BunCommand::new()?;
+        if !bun.exists() {
             return Err("bun is not installed. Please install bun to continue.".to_string());
         }
-        Ok(bun_path)
+        Ok(bun)
     }
 
     /// Send SIGTERM to a child process tree (polite shutdown request).
@@ -1111,6 +1110,13 @@ impl ProcessManager {
     /// If http_check is Some((host, port)), also performs an HTTP health probe.
     /// If http_check is None (for DB), just checks if the process is running.
     ///
+    /// Returns:
+    /// - "healthy": process is running and responding to HTTP probes (or running for DB)
+    /// - "starting": process is running but not yet responding to HTTP probes
+    /// - "stopped": process was never started or was explicitly stopped
+    /// - "failed": process was started but has exited (crashed) - unrecoverable
+    /// - "error": failed to check process status
+    ///
     /// IMPORTANT: Mutex is released before HTTP probe to avoid blocking other operations.
     async fn status_for_process(
         &self,
@@ -1121,10 +1127,13 @@ impl ProcessManager {
         let process_running = {
             let mut guard = child.lock().await;
             match guard.as_mut() {
+                // Process was never started or was explicitly stopped
                 None => return "stopped".to_string(),
                 Some(process) => match process.try_wait() {
-                    Ok(None) => true, // Still running
-                    Ok(Some(_)) => return "stopped".to_string(),
+                    // Process is still running
+                    Ok(None) => true,
+                    // Process has exited - this is a failure (crashed/error)
+                    Ok(Some(_)) => return "failed".to_string(),
                     Err(_) => return "error".to_string(),
                 },
             }

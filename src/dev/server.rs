@@ -40,6 +40,8 @@ struct HealthResponse {
     frontend_status: String,
     backend_status: String,
     db_status: String,
+    /// True if any critical process (frontend/backend) has permanently failed and cannot recover
+    failed: bool,
 }
 
 /// Run the dev server with a pre-bound listener.
@@ -272,6 +274,9 @@ fn start_filesystem_watcher(
 async fn health(State(state): State<AppState>) -> (StatusCode, Json<HealthResponse>) {
     let (frontend_status, backend_status, db_status) = state.process_manager.status().await;
 
+    // Check if any critical process has permanently failed (crashed/exited)
+    let failed = frontend_status == "failed" || backend_status == "failed";
+
     // DB is non-critical - only frontend and backend must be healthy for "ok" status
     let all_healthy = frontend_status == "healthy" && backend_status == "healthy";
     let status = if all_healthy { "ok" } else { "starting" };
@@ -283,6 +288,7 @@ async fn health(State(state): State<AppState>) -> (StatusCode, Json<HealthRespon
             frontend_status,
             backend_status,
             db_status, // Reported but doesn't affect overall status
+            failed,
         }),
     )
 }

@@ -43,7 +43,7 @@ async fn run_inner(args: StatusArgs) -> Result<(), String> {
     // Query the health endpoint
     match get_status(lock.port).await {
         Ok(status) => {
-            println!("Dev Server Status: running");
+            println!("🚀 Dev server is running at http://localhost:{}", lock.port);
             println!("Frontend: {}", status.frontend_status);
             println!("Backend: {}", status.backend_status);
             Ok(())

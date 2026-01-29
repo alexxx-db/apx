@@ -2,8 +2,9 @@ use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 use std::path::{Path, PathBuf};
+use std::sync::Once;
 use std::time::Duration;
-use tracing::{debug, trace};
+use tracing::{debug, trace, warn};
 
 use crate::dev::common::{CLIENT_HOST, lock_path, read_lock};
 
@@ -21,10 +22,49 @@ pub(crate) fn get_bun_binary_path(py: Python<'_>) -> PyResult<Py<PyAny>> {
 }
 
 pub(crate) fn bun_binary_path() -> Result<PathBuf, String> {
+    warn_if_system_bun_exists();
     Python::attach(|py| {
         resolve_bun_binary_path(py)
             .map_err(|err| format!("Failed to resolve bun binary path: {err}"))
     })
+}
+
+static SYSTEM_BUN_WARNING: Once = Once::new();
+
+/// Check if there's a bun binary on the system PATH and warn the user once.
+/// apx always uses its bundled bun, but we inform users about any system bun.
+fn warn_if_system_bun_exists() {
+    SYSTEM_BUN_WARNING.call_once(|| {
+        if let Some(system_bun) = find_system_bun() {
+            warn!(
+                "System bun found at '{}'. apx will use its bundled bun instead.",
+                system_bun.display()
+            );
+        }
+    });
+}
+
+/// Find bun on the system PATH (ignoring apx bundled bun).
+fn find_system_bun() -> Option<PathBuf> {
+    #[cfg(target_os = "windows")]
+    let bun_name = "bun.exe";
+    #[cfg(not(target_os = "windows"))]
+    let bun_name = "bun";
+
+    let path_env = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&path_env) {
+        let candidate = dir.join(bun_name);
+        if candidate.is_file() {
+            // Check if this is the apx bundled bun by looking at the path
+            // The bundled bun is inside the apx package (e.g., site-packages/apx/binaries/)
+            let path_str = candidate.to_string_lossy();
+            if path_str.contains("apx") && path_str.contains("binaries") {
+                continue;
+            }
+            return Some(candidate);
+        }
+    }
+    None
 }
 
 fn resolve_bun_binary_path(py: Python<'_>) -> PyResult<PathBuf> {

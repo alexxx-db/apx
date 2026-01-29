@@ -1,12 +1,14 @@
 use clap::Args;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 use tokio::process::Command;
 use tracing::debug;
 
-use crate::bun_binary_path;
 use crate::cli::run_cli_async;
-use crate::common::{ensure_dir, run_preflight_checks};
+use crate::common::{
+    ensure_dir, format_elapsed_ms, run_command_streaming_with_output, run_preflight_checks, spinner,
+};
 use crate::generate_openapi;
 
 const DEFAULT_BUILD_DIR: &str = ".build";
@@ -44,8 +46,7 @@ async fn run_inner(args: BuildArgs) -> Result<(), String> {
 
     // Run preflight checks: generate _metadata.py, __dist__, uv sync, version file, bun install if needed
     debug!("Running preflight checks before build");
-    let bun_path = bun_binary_path()?;
-    let _preflight = run_preflight_checks(&app_path, &bun_path).await?;
+    let _preflight = run_preflight_checks(&app_path).await?;
 
     // Set up build directory
     if build_dir.exists() {
@@ -81,28 +82,33 @@ async fn build_ui(app_path: &Path) -> Result<(), String> {
 }
 
 async fn build_wheel(app_path: &Path, build_path: &Path) -> Result<(), String> {
+    let start_time = Instant::now();
+    let sp = spinner("🐍 Building Python wheel...");
+
     let base_version = get_base_version(app_path).await;
     let build_version = generate_build_version(&base_version);
 
-    let output = Command::new("uv")
-        .arg("build")
+    let mut cmd = Command::new("uv");
+    cmd.arg("build")
         .arg("--wheel")
         .arg("--out-dir")
         .arg(build_path)
         .current_dir(app_path)
-        .env("UV_DYNAMIC_VERSIONING_BYPASS", build_version)
-        .output()
-        .await
-        .map_err(|err| format!("Failed to run uv build: {err}"))?;
+        .env("UV_DYNAMIC_VERSIONING_BYPASS", build_version);
 
-    if !output.status.success() {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!(
-            "Failed to build Python wheel. Stdout: {stdout} Stderr: {stderr}"
-        ));
+    let result =
+        run_command_streaming_with_output(cmd, &sp, "🐍 Wheel:", "Failed to build Python wheel")
+            .await;
+
+    sp.finish_and_clear();
+
+    match result {
+        Ok(_) => {
+            println!("✅ Python wheel built in {}", format_elapsed_ms(start_time));
+            Ok(())
+        }
+        Err(e) => Err(e),
     }
-    Ok(())
 }
 
 fn copy_app_config_files(app_path: &Path, build_dir: &Path) -> Result<(), String> {

@@ -1,7 +1,6 @@
-use crate::bun_binary_path;
 use crate::cli::run_cli_async;
+use crate::common::BunCommand;
 use clap::Args;
-use tokio::process::Command as TokioCommand;
 use tokio::select;
 use tokio::signal;
 use tracing::debug;
@@ -18,15 +17,16 @@ pub async fn run(args: BunArgs) -> i32 {
 }
 
 pub async fn run_inner(args: BunArgs) -> Result<(), String> {
-    let bun_path = bun_binary_path()?;
+    let bun = BunCommand::new()?;
 
     debug!(
-        bun_path = %bun_path.display(),
+        bun_path = %bun.path().display(),
         args = ?args.args,
         "Running bun with passthrough args"
     );
 
-    let mut child = TokioCommand::new(bun_path)
+    let mut child = bun
+        .tokio_command()
         .args(&args.args)
         .spawn()
         .map_err(|e| format!("Failed to spawn bun: {e}"))?;

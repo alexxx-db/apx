@@ -4,7 +4,6 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
-use crate::bun_binary_path;
 use crate::cli::dev::logs::LogsArgs;
 // StartupLogStreamer is imported locally in wait_for_healthy_with_logs
 use crate::cli::dev::stop::stop_dev_server;
@@ -153,10 +152,9 @@ async fn run_preflight(app_dir: &Path) -> Result<(), String> {
     println!("🛫 Preflight check started...");
     let preflight_start = Instant::now();
 
-    let bun_path = bun_binary_path()?;
     let preflight_spinner = spinner("  Running preflight checks...");
 
-    let result = run_preflight_checks(app_dir, &bun_path).await;
+    let result = run_preflight_checks(app_dir).await;
     preflight_spinner.finish_and_clear();
 
     match result {
@@ -383,6 +381,21 @@ async fn wait_for_healthy_with_logs(
                                 elapsed_ms, attempt_count
                             );
                             first_response_logged = true;
+                        }
+
+                        // FAIL FAST: Check if any critical process has permanently failed
+                        if status_response.failed {
+                            debug!(
+                                "Process failure detected after {}ms - frontend: {}, backend: {}",
+                                elapsed_ms,
+                                status_response.frontend_status,
+                                status_response.backend_status
+                            );
+                            return Err(format!(
+                                "Process failed and cannot recover. Frontend: {}, Backend: {}",
+                                status_response.frontend_status,
+                                status_response.backend_status
+                            ));
                         }
 
                         if status_response.status == "ok" {

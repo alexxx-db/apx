@@ -1,9 +1,26 @@
-use indicatif::{ProgressBar, ProgressStyle};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
 use std::time::{Duration, Instant};
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
+
+use crate::bun_binary_path;
+
+/// Dev dependencies required by apx frontend entrypoint.ts
+/// These must be installed before running any frontend command
+pub const ENTRYPOINT_DEV_DEPS: &[&str] = &[
+    "vite",
+    "@tailwindcss/vite",
+    "@vitejs/plugin-react",
+    "@tanstack/router-plugin",
+    "@opentelemetry/sdk-logs",
+    "@opentelemetry/exporter-logs-otlp-http",
+    "@opentelemetry/api-logs",
+    "@opentelemetry/resources",
+];
 
 /// List available Databricks CLI profiles from ~/.databrickscfg
 pub fn list_profiles() -> Result<Vec<String>, String> {
@@ -114,6 +131,51 @@ impl ApxCommand {
     /// Format the command for display/logging.
     pub fn display(&self) -> String {
         self.inner.display()
+    }
+}
+
+/// Command to spawn bun using the apx-bundled binary.
+///
+/// This ensures bun is ALWAYS run from the apx package's bundled binary,
+/// ignoring any system bun that might be on PATH.
+#[derive(Debug, Clone)]
+pub struct BunCommand {
+    bun_path: PathBuf,
+}
+
+impl BunCommand {
+    /// Create a new BunCommand instance.
+    /// Returns an error if the bundled bun binary cannot be resolved.
+    pub fn new() -> Result<Self, String> {
+        let bun_path = bun_binary_path()?;
+        Ok(Self { bun_path })
+    }
+
+    /// Get the path to the bundled bun binary.
+    pub fn path(&self) -> &Path {
+        &self.bun_path
+    }
+
+    /// Check if the bundled bun binary exists.
+    pub fn exists(&self) -> bool {
+        self.bun_path.exists()
+    }
+
+    /// Create a new std::process::Command for spawning bun.
+    #[allow(dead_code)]
+    pub fn command(&self) -> std::process::Command {
+        std::process::Command::new(&self.bun_path)
+    }
+
+    /// Create a new tokio::process::Command for spawning bun.
+    pub fn tokio_command(&self) -> tokio::process::Command {
+        tokio::process::Command::new(&self.bun_path)
+    }
+
+    /// Format the command for display/logging.
+    #[allow(dead_code)]
+    pub fn display(&self) -> String {
+        format!("bun ({})", self.bun_path.display())
     }
 }
 
@@ -275,8 +337,9 @@ pub fn ensure_dir(path: &Path) -> Result<(), String> {
     fs::create_dir_all(path).map_err(|err| format!("Failed to create directory: {err}"))
 }
 
-pub async fn bun_install(app_dir: &Path, bun_path: &Path) -> Result<(), String> {
-    let mut cmd = Command::new(bun_path);
+pub async fn bun_install(app_dir: &Path) -> Result<(), String> {
+    let bun = BunCommand::new()?;
+    let mut cmd = bun.tokio_command();
     cmd.arg("install");
     if let Ok(cache_dir) = std::env::var("BUN_CACHE_DIR") {
         cmd.arg("--cache-dir").arg(cache_dir);
@@ -296,6 +359,50 @@ pub async fn bun_install(app_dir: &Path, bun_path: &Path) -> Result<(), String> 
         ));
     }
 
+    Ok(())
+}
+
+/// Run `bun install` with real-time streaming output to a progress bar.
+pub async fn bun_install_streaming(app_dir: &Path, spinner: &ProgressBar) -> Result<(), String> {
+    let bun = BunCommand::new()?;
+    let mut cmd = bun.tokio_command();
+    cmd.arg("install");
+    if let Ok(cache_dir) = std::env::var("BUN_CACHE_DIR") {
+        cmd.arg("--cache-dir").arg(cache_dir);
+    }
+    cmd.current_dir(app_dir);
+
+    run_command_streaming(cmd, spinner, "📦 bun:", "bun install failed").await
+}
+
+/// Ensure all entrypoint.ts dependencies are installed.
+/// Runs `bun add --dev` for required dependencies (idempotent - safe if already installed).
+pub async fn ensure_entrypoint_deps(app_dir: &Path) -> Result<(), String> {
+    tracing::debug!(
+        "Ensuring frontend dependencies: {}",
+        ENTRYPOINT_DEV_DEPS.join(", ")
+    );
+
+    // Run bun add --dev for all dependencies (idempotent operation)
+    let bun = BunCommand::new()?;
+    let mut cmd = bun.tokio_command();
+    cmd.arg("add").arg("--dev");
+    for dep in ENTRYPOINT_DEV_DEPS {
+        cmd.arg(*dep);
+    }
+    cmd.current_dir(app_dir);
+
+    let output = cmd
+        .output()
+        .await
+        .map_err(|e| format!("Failed to run bun add: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Failed to install frontend dependencies: {stderr}"));
+    }
+
+    tracing::debug!("Frontend dependencies installed successfully");
     Ok(())
 }
 
@@ -400,10 +507,7 @@ pub struct PreflightResult {
 /// 4. Runs `bun install` if `node_modules` is missing
 ///
 /// Returns timing information for each step.
-pub async fn run_preflight_checks(
-    app_dir: &Path,
-    bun_path: &Path,
-) -> Result<PreflightResult, String> {
+pub async fn run_preflight_checks(app_dir: &Path) -> Result<PreflightResult, String> {
     // Step 1: Verify project layout (generates _metadata.py and creates __dist__)
     let layout_start = Instant::now();
     let metadata = read_project_metadata(app_dir)?;
@@ -424,7 +528,7 @@ pub async fn run_preflight_checks(
     let node_modules_dir = app_dir.join("node_modules");
     let bun_install_ms = if !node_modules_dir.exists() {
         let bun_start = Instant::now();
-        bun_install(app_dir, bun_path).await?;
+        bun_install(app_dir).await?;
         Some(bun_start.elapsed().as_millis())
     } else {
         None
@@ -457,6 +561,177 @@ pub fn spinner(message: &str) -> ProgressBar {
     spinner.enable_steady_tick(Duration::from_millis(80));
     spinner.set_message(message.to_string());
     spinner
+}
+
+/// Create a multi-progress container for parallel task progress display.
+pub fn multi_progress() -> MultiProgress {
+    MultiProgress::new()
+}
+
+/// Create a spinner attached to a multi-progress container.
+pub fn multi_spinner(mp: &MultiProgress, message: &str) -> ProgressBar {
+    let spinner = mp.add(ProgressBar::new_spinner());
+    spinner.set_style(
+        ProgressStyle::with_template("{spinner:.cyan} {msg}")
+            .unwrap_or_else(|_| ProgressStyle::default_spinner()),
+    );
+    spinner.enable_steady_tick(Duration::from_millis(80));
+    spinner.set_message(message.to_string());
+    spinner
+}
+
+/// Run a command and stream its output to a progress bar in real-time.
+/// The progress bar message will be updated with each line of output.
+pub async fn run_command_streaming(
+    mut cmd: Command,
+    spinner: &ProgressBar,
+    prefix: &str,
+    error_msg: &str,
+) -> Result<(), String> {
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
+
+    let mut child = cmd.spawn().map_err(|err| format!("{error_msg}: {err}"))?;
+
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+
+    let prefix_stdout = prefix.to_string();
+    let prefix_stderr = prefix.to_string();
+    let spinner_stdout = spinner.clone();
+    let spinner_stderr = spinner.clone();
+
+    // Spawn tasks to read stdout and stderr concurrently
+    let stdout_task = tokio::spawn(async move {
+        if let Some(stdout) = stdout {
+            let reader = BufReader::new(stdout);
+            let mut lines = reader.lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                let trimmed = line.trim();
+                if !trimmed.is_empty() {
+                    spinner_stdout.set_message(format!("{prefix_stdout} {trimmed}"));
+                }
+            }
+        }
+    });
+
+    let stderr_task = tokio::spawn(async move {
+        if let Some(stderr) = stderr {
+            let reader = BufReader::new(stderr);
+            let mut lines = reader.lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                let trimmed = line.trim();
+                if !trimmed.is_empty() {
+                    spinner_stderr.set_message(format!("{prefix_stderr} {trimmed}"));
+                }
+            }
+        }
+    });
+
+    // Wait for both readers and the process to complete
+    let _ = tokio::join!(stdout_task, stderr_task);
+
+    let status = child
+        .wait()
+        .await
+        .map_err(|err| format!("{error_msg}: {err}"))?;
+
+    if !status.success() {
+        return Err(format!("{error_msg}: exit code {status}"));
+    }
+
+    Ok(())
+}
+
+/// Output captured from a streaming command.
+#[derive(Debug, Default)]
+pub struct StreamingOutput {
+    pub stdout: String,
+    pub stderr: String,
+}
+
+/// Run a command, stream its output to a progress bar, AND capture output for error reporting.
+/// Returns the captured output on success, or an error with full output on failure.
+pub async fn run_command_streaming_with_output(
+    mut cmd: Command,
+    spinner: &ProgressBar,
+    prefix: &str,
+    error_msg: &str,
+) -> Result<StreamingOutput, String> {
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
+
+    let mut child = cmd.spawn().map_err(|err| format!("{error_msg}: {err}"))?;
+
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+
+    let prefix_stdout = prefix.to_string();
+    let prefix_stderr = prefix.to_string();
+    let spinner_stdout = spinner.clone();
+    let spinner_stderr = spinner.clone();
+
+    // Spawn tasks to read stdout and stderr concurrently, capturing all output
+    let stdout_task = tokio::spawn(async move {
+        let mut captured = Vec::new();
+        if let Some(stdout) = stdout {
+            let reader = BufReader::new(stdout);
+            let mut lines = reader.lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                captured.push(line.clone());
+                let trimmed = line.trim();
+                if !trimmed.is_empty() {
+                    spinner_stdout.set_message(format!("{prefix_stdout} {trimmed}"));
+                }
+            }
+        }
+        captured.join("\n")
+    });
+
+    let stderr_task = tokio::spawn(async move {
+        let mut captured = Vec::new();
+        if let Some(stderr) = stderr {
+            let reader = BufReader::new(stderr);
+            let mut lines = reader.lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                captured.push(line.clone());
+                let trimmed = line.trim();
+                if !trimmed.is_empty() {
+                    spinner_stderr.set_message(format!("{prefix_stderr} {trimmed}"));
+                }
+            }
+        }
+        captured.join("\n")
+    });
+
+    // Wait for both readers and the process to complete
+    let (stdout_result, stderr_result) = tokio::join!(stdout_task, stderr_task);
+
+    let output = StreamingOutput {
+        stdout: stdout_result.unwrap_or_default(),
+        stderr: stderr_result.unwrap_or_default(),
+    };
+
+    let status = child
+        .wait()
+        .await
+        .map_err(|err| format!("{error_msg}: {err}"))?;
+
+    if !status.success() {
+        let mut full_error = format!("{error_msg}: exit code {}", status.code().unwrap_or(-1));
+
+        if !output.stderr.is_empty() {
+            full_error.push_str(&format!("\n\nStderr:\n{}", output.stderr));
+        }
+
+        if !output.stdout.is_empty() {
+            full_error.push_str(&format!("\n\nStdout:\n{}", output.stdout));
+        }
+
+        return Err(full_error);
+    }
+
+    Ok(output)
 }
 
 pub fn format_elapsed_ms(start: Instant) -> String {

@@ -1,8 +1,8 @@
 use clap::Args;
 use std::path::PathBuf;
 
-use crate::bun_binary_path;
 use crate::cli::run_cli_async;
+use crate::common::BunCommand;
 use tokio::process::Command as TokioCommand;
 use tracing::debug;
 
@@ -25,11 +25,12 @@ pub async fn run_inner(args: CheckArgs) -> Result<(), String> {
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
 
     // Run tsc -b --incremental in one tokio thread
-    let bun_path = bun_binary_path()?;
+    let bun = BunCommand::new()?;
     let app_dir_clone = app_dir.clone();
     let tsc_task = tokio::spawn(async move {
-        debug!(bun_path = %bun_path.display(), "Running tsc -b --incremental.");
-        let output = TokioCommand::new(bun_path)
+        debug!(bun_path = %bun.path().display(), "Running tsc -b --incremental.");
+        let output = bun
+            .tokio_command()
             .arg("run")
             .arg("tsc")
             .arg("-b")
