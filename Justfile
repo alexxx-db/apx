@@ -70,3 +70,6 @@ sync:
 
 uv-sync:
     RUST_LOG=debug uv sync
+
+release-registry:
+    gh workflow run deploy-registry.yml
