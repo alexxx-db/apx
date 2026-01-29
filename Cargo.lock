@@ -148,7 +148,7 @@ dependencies = [
 
 [[package]]
 name = "apx"
-version = "0.1.14"
+version = "0.1.15"
 dependencies = [
  "arrow",
  "axum",
