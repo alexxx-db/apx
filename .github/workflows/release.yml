@@ -127,6 +127,7 @@ jobs:
           sccache: true
           docker-options: >-
             -v ${{ github.workspace }}/.protoc:/protoc
+            -e PROTOC=/protoc/bin/protoc
 
       - name: Build wheels (macOS/Windows)
         if: runner.os != 'Linux'
