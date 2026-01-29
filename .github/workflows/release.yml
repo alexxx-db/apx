@@ -82,15 +82,37 @@ jobs:
           manylinux: ${{ matrix.manylinux || 'auto' }}
           sccache: true
           before-script-linux: |
-            # Install protoc based on available package manager
-            # Standard manylinux images use yum (AlmaLinux/RHEL)
-            # rust-cross images use apt (Ubuntu)
-            if command -v apt-get &> /dev/null; then
-              apt-get update
-              apt-get install -y protobuf-compiler
-            elif command -v yum &> /dev/null; then
-              yum install -y protobuf-compiler
+            # Install recent protoc binary (package manager versions are too old)
+            # lance-encoding requires protoc 3.12+ for --experimental_allow_proto3_optional
+            set -e
+            PROTOC_VERSION="28.3"
+            ARCH=$(uname -m)
+
+            # Determine protoc architecture
+            if [ "$ARCH" = "x86_64" ]; then
+              PROTOC_ARCH="linux-x86_64"
+            elif [ "$ARCH" = "aarch64" ]; then
+              PROTOC_ARCH="linux-aarch_64"
+            else
+              echo "Unsupported architecture: $ARCH" && exit 1
             fi
+
+            # Install unzip based on package manager
+            if command -v apt-get &> /dev/null; then
+              apt-get update && apt-get install -y unzip curl
+            elif command -v yum &> /dev/null; then
+              yum install -y unzip
+            fi
+
+            # Download and install protoc
+            PROTOC_URL="https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-${PROTOC_ARCH}.zip"
+            echo "Downloading protoc from $PROTOC_URL"
+            curl -LO "$PROTOC_URL"
+            unzip -o "protoc-${PROTOC_VERSION}-${PROTOC_ARCH}.zip" -d /usr/local bin/protoc 'include/*'
+            rm "protoc-${PROTOC_VERSION}-${PROTOC_ARCH}.zip"
+            chmod +x /usr/local/bin/protoc
+
+            # Verify installation
             protoc --version
 
       - name: Upload wheels
