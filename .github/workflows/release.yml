@@ -99,20 +99,20 @@ jobs:
       - name: Download binaries
         run: uv run --script scripts/get_binaries.py
 
-  #     # ============================================
-  #     # Build Wheels - All Platforms
-  #     # ============================================
-  #     - name: Build wheels (Linux)
-  #       if: runner.os == 'Linux'
-  #       uses: PyO3/maturin-action@v1
-  #       with:
-  #         target: ${{ matrix.target }}
-  #         args: --release --out dist --compression-level 9
-  #         manylinux: ${{ matrix.manylinux }}
-  #         sccache: true
-  #         # Mount .protoc into Docker container and set PROTOC env var
-  #         # This makes the cached protoc available inside manylinux container
-  #         docker-options: -v ${{ github.workspace }}/.protoc:/protoc -e PROTOC=/protoc/bin/protoc
+      # ============================================
+      # Build Wheels - All Platforms
+      # ============================================
+      - name: Build wheels (Linux)
+        if: runner.os == 'Linux'
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          args: --release --out dist --compression-level 9
+          manylinux: ${{ matrix.manylinux }}
+          sccache: true
+          # Mount .protoc into Docker container and set PROTOC env var
+          # This makes the cached protoc available inside manylinux container
+          docker-options: -v ${{ github.workspace }}/.protoc:/protoc -e PROTOC=/protoc/bin/protoc
 
   #     - name: Build wheels (macOS/Windows)
   #       if: runner.os != 'Linux'
