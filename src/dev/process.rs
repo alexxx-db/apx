@@ -18,8 +18,10 @@ use tokio::sync::Mutex;
 use tokio::time::{Duration, timeout};
 use tracing::{debug, info, warn};
 
+use reqwest;
+
 use crate::bun_binary_path;
-use crate::common::{handle_spawn_error, read_project_metadata, ApxCommand, UvCommand};
+use crate::common::{ApxCommand, UvCommand, handle_spawn_error, read_project_metadata};
 use crate::dev::common::CLIENT_HOST;
 use crate::dev::otel::forward_log_to_flux;
 use crate::dotenv::DotenvFile;
@@ -50,7 +52,7 @@ impl fmt::Display for LogSource {
 fn format_log_line(source: LogSource, message: &str) -> String {
     let now = chrono::Utc::now();
     let timestamp = now.format("%Y-%m-%d %H:%M:%S%.3f");
-    format!("{} | {:>4} | {}", timestamp, source, message)
+    format!("{timestamp} | {source:>4} | {message}")
 }
 
 #[derive(Debug)]
@@ -72,7 +74,9 @@ pub struct ProcessManager {
 }
 
 impl ProcessManager {
-    pub async fn start(
+    /// Create a new ProcessManager without spawning processes.
+    /// Call `start_processes()` to spawn processes in the background.
+    pub fn new(
         app_dir: &Path,
         host: &str,
         dev_server_port: u16,
@@ -80,8 +84,6 @@ impl ProcessManager {
         frontend_port: u16,
         db_port: u16,
     ) -> Result<Self, String> {
-        let bun_path = Self::ensure_bun_path()?;
-
         // Note: Preflight checks (metadata, uv sync, bun install) are done client-side in start.rs
         let metadata = read_project_metadata(app_dir)?;
 
@@ -92,7 +94,18 @@ impl ProcessManager {
 
         let dev_token = Self::generate_dev_token();
         let db_password = Self::generate_dev_token(); // Random password for PGlite
-        let manager = Self {
+
+        debug!(
+            app_dir = %app_dir.display(),
+            host = %host,
+            dev_server_port,
+            backend_port,
+            frontend_port,
+            db_port,
+            "Creating ProcessManager"
+        );
+
+        Ok(Self {
             frontend_child: Arc::new(Mutex::new(None)),
             backend_child: Arc::new(Mutex::new(None)),
             db_child: Arc::new(Mutex::new(None)),
@@ -107,24 +120,59 @@ impl ProcessManager {
             app_slug,
             app_entrypoint,
             dotenv_vars,
-        };
+        })
+    }
 
-        debug!("Spawning frontend dev process");
-        manager.spawn_bun_dev(app_dir).await?;
-        debug!("Spawning PGLite database process");
-        manager.spawn_pglite(&bun_path).await?;
-        debug!("Spawning uvicorn process");
-        manager
-            .spawn_uvicorn(app_dir, metadata.app_entrypoint)
-            .await?;
+    /// Spawn processes in background (DB → Vite → Uvicorn).
+    /// DB is non-critical - failures are logged but don't block other processes.
+    /// This method spawns a background task and returns immediately.
+    pub fn start_processes(self: &Arc<Self>) {
+        let pm = Arc::clone(self);
+        tokio::spawn(async move {
+            // 1. DB (non-critical) - warn on failure but continue
+            debug!("Starting PGlite database process...");
+            match Self::ensure_bun_path() {
+                Ok(bun_path) => {
+                    if let Err(e) = pm.spawn_pglite(&bun_path).await {
+                        warn!(
+                            "⚠️ Failed to start PGlite database: {}. Continuing without DB.",
+                            e
+                        );
+                        // Don't return - continue with other processes
+                    } else {
+                        debug!("PGlite database started successfully");
+                    }
+                }
+                Err(e) => {
+                    warn!(
+                        "⚠️ Bun not available for PGlite: {}. Continuing without DB.",
+                        e
+                    );
+                }
+            }
 
-        debug!("Starting file watcher for backend restart");
-        manager.start_backend_file_watcher();
+            // 2. Vite (critical)
+            debug!("Starting Vite frontend process...");
+            if let Err(e) = pm.spawn_bun_dev(&pm.app_dir).await {
+                warn!("Failed to start frontend: {}", e);
+                return; // Critical failure
+            }
+            debug!("Vite frontend started successfully");
 
-        debug!(
-            "Frontend and backend processes spawned, services will become healthy as they start listening"
-        );
-        Ok(manager)
+            // 3. Uvicorn (critical)
+            debug!("Starting uvicorn backend process...");
+            if let Err(e) = pm
+                .spawn_uvicorn(&pm.app_dir, pm.app_entrypoint.clone())
+                .await
+            {
+                warn!("Failed to start backend: {}", e);
+                return; // Critical failure
+            }
+            debug!("Uvicorn backend started successfully");
+
+            debug!("All processes spawned, starting file watcher");
+            pm.start_backend_file_watcher();
+        });
     }
 
     pub fn dev_token(&self) -> &str {
@@ -175,25 +223,18 @@ impl ProcessManager {
         debug!("All processes stopped.");
     }
 
+    /// Get the status of all managed processes.
+    /// Runs all three checks in parallel using tokio::join! to avoid blocking.
     pub async fn status(&self) -> (String, String, String) {
-        let frontend_status = Self::status_for_child(
-            &self.frontend_child,
-            "localhost",
-            self.frontend_port,
-        )
-        .await;
-        let backend_status = Self::status_for_child(
-            &self.backend_child,
-            &self.host,
-            self.backend_port,
-        )
-        .await;
-        let db_status = Self::status_for_child(
-            &self.db_child,
-            &self.host,
-            self.db_port,
-        )
-        .await;
+        // Run all three checks in parallel - no mutex held during HTTP probes
+        let (frontend_status, backend_status, db_status) = tokio::join!(
+            self.status_for_process(
+                &self.frontend_child,
+                Some(("localhost", self.frontend_port))
+            ),
+            self.status_for_process(&self.backend_child, Some((&self.host, self.backend_port))),
+            self.status_for_process(&self.db_child, None), // DB: no HTTP check, just process status
+        );
         (frontend_status, backend_status, db_status)
     }
 
@@ -246,9 +287,7 @@ impl ProcessManager {
         );
         cmd.env("OTEL_SERVICE_NAME", format!("{}_ui", self.app_slug));
 
-        let child = cmd
-            .spawn()
-            .map_err(|err| handle_spawn_error("apx", err))?;
+        let child = cmd.spawn().map_err(|err| handle_spawn_error("apx", err))?;
 
         let mut guard = self.frontend_child.lock().await;
         *guard = Some(child);
@@ -345,7 +384,7 @@ impl ProcessManager {
         let config_dir = app_dir.join(".apx");
         tokio::fs::create_dir_all(&config_dir)
             .await
-            .map_err(|e| format!("Failed to create .apx directory: {}", e))?;
+            .map_err(|e| format!("Failed to create .apx directory: {e}"))?;
 
         let config_path = config_dir.join("uvicorn_logging.json");
         // APX adds: timestamp | source | channel | <this output>
@@ -400,7 +439,7 @@ impl ProcessManager {
 
         tokio::fs::write(&config_path, config_content)
             .await
-            .map_err(|e| format!("Failed to write uvicorn logging config: {}", e))?;
+            .map_err(|e| format!("Failed to write uvicorn logging config: {e}"))?;
 
         Ok(config_path.display().to_string())
     }
@@ -444,7 +483,7 @@ impl ProcessManager {
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
-        Err(format!("PGlite not ready on {}:{}", host, port))
+        Err(format!("PGlite not ready on {host}:{port}"))
     }
 
     /// Change the PGlite database password using tokio-postgres.
@@ -453,14 +492,12 @@ impl ProcessManager {
     async fn change_db_password(host: &str, port: u16, new_password: &str) -> Result<(), String> {
         use tokio_postgres::NoTls;
 
-        let conn_str = format!(
-            "host={} port={} user=postgres password=postgres dbname=postgres",
-            host, port
-        );
+        let conn_str =
+            format!("host={host} port={port} user=postgres password=postgres dbname=postgres");
 
         let (client, connection) = tokio_postgres::connect(&conn_str, NoTls)
             .await
-            .map_err(|e| format!("Failed to connect to PGlite: {}", e))?;
+            .map_err(|e| format!("Failed to connect to PGlite: {e}"))?;
 
         // Spawn connection task with a handle so we can wait for it
         let conn_handle = tokio::spawn(async move {
@@ -471,12 +508,12 @@ impl ProcessManager {
 
         // Escape single quotes for SQL safety
         let escaped = new_password.replace('\'', "''");
-        let query = format!("ALTER USER postgres WITH PASSWORD '{}'", escaped);
+        let query = format!("ALTER USER postgres WITH PASSWORD '{escaped}'");
 
         let result = client
             .execute(&query, &[])
             .await
-            .map_err(|e| format!("Failed to change password: {}", e));
+            .map_err(|e| format!("Failed to change password: {e}"));
 
         // Drop the client to signal the connection to close
         drop(client);
@@ -693,7 +730,7 @@ impl ProcessManager {
 
         let mut child = cmd
             .spawn()
-            .map_err(|err| format!("Failed to start {} process: {err}", source))?;
+            .map_err(|err| format!("Failed to start {source} process: {err}"))?;
 
         // Spawn tasks to read stdout/stderr, prefix with source, and forward to flux
         let service_name = format!("{}_{}", self.app_slug, source);
@@ -819,7 +856,7 @@ impl ProcessManager {
             .map_err(|err| handle_spawn_error("uvicorn", err))?;
 
         // Spawn tasks to read stdout/stderr, prefix with source, and forward to flux
-        let service_name = format!("{}_app", app_slug);
+        let service_name = format!("{app_slug}_app");
         let app_path = app_dir.display().to_string();
 
         if let Some(stdout) = child.stdout.take() {
@@ -1070,28 +1107,61 @@ impl ProcessManager {
         }
     }
 
-    async fn status_for_child(
+    /// Check the status of a process.
+    /// If http_check is Some((host, port)), also performs an HTTP health probe.
+    /// If http_check is None (for DB), just checks if the process is running.
+    ///
+    /// IMPORTANT: Mutex is released before HTTP probe to avoid blocking other operations.
+    async fn status_for_process(
+        &self,
         child: &Arc<Mutex<Option<Child>>>,
-        host: &str,
-        port: u16,
+        http_check: Option<(&str, u16)>,
     ) -> String {
-        let mut guard = child.lock().await;
-        match guard.as_mut() {
-            None => "stopped".to_string(),
-            Some(process) => match process.try_wait() {
-                Ok(None) => {
-                    // Process is running, check if port is accepting connections
-                    let port_ready = tokio::net::TcpStream::connect((host, port)).await.is_ok();
+        // Quick mutex access to check process state - released before HTTP probe
+        let process_running = {
+            let mut guard = child.lock().await;
+            match guard.as_mut() {
+                None => return "stopped".to_string(),
+                Some(process) => match process.try_wait() {
+                    Ok(None) => true, // Still running
+                    Ok(Some(_)) => return "stopped".to_string(),
+                    Err(_) => return "error".to_string(),
+                },
+            }
+        }; // Mutex released here!
 
-                    if port_ready {
-                        "healthy".to_string()
-                    } else {
-                        "starting".to_string()
-                    }
+        // Process is running - for DB that's healthy, for others need HTTP check
+        if !process_running {
+            return "stopped".to_string();
+        }
+
+        match http_check {
+            None => "healthy".to_string(), // DB: running = healthy
+            Some((host, port)) => {
+                if Self::http_health_probe(host, port).await {
+                    "healthy".to_string()
+                } else {
+                    "starting".to_string()
                 }
-                Ok(Some(_)) => "stopped".to_string(),
-                Err(_) => "error".to_string(),
-            },
+            }
+        }
+    }
+
+    /// Check if a service is healthy by making an HTTP GET request to its root path.
+    /// Returns true if the service responds with any non-5xx status code.
+    async fn http_health_probe(host: &str, port: u16) -> bool {
+        let url = format!("http://{host}:{port}/");
+        let client = match reqwest::Client::builder()
+            .timeout(Duration::from_secs(2))
+            .build()
+        {
+            Ok(c) => c,
+            Err(_) => return false,
+        };
+
+        match client.get(&url).send().await {
+            Ok(resp) => !resp.status().is_server_error(), // 5xx = unhealthy, else healthy
+            Err(_) => false,
         }
     }
 
@@ -1176,4 +1246,3 @@ impl ProcessManager {
         }
     }
 }
-

@@ -3,6 +3,8 @@
 fmt:
     uv tool run ruff format .
     bun x prettier --write .
+    cargo fmt --all
+    
 
 lint:
     uv tool run ruff check .
@@ -13,7 +15,10 @@ build *args:
 
 types:
     cargo check
+    cargo fmt --all -- --check
+    cargo clippy --all-targets -- -D warnings
     uv tool run ty check
+
     
 
 check: lint types
@@ -31,7 +36,7 @@ pm message:
     git push
 
 
-gen folder profile *args: develop
+gen folder profile *args: uv-sync
     rm -rf /tmp/{{folder}}
     RUST_LOG=DEBUG APX_DEV_PATH="{{justfile_directory()}}" uv run --no-sync apx init /tmp/{{folder}} -p {{profile}}  {{args}}
     cd /tmp/{{folder}} && uv run apx dev check
@@ -62,3 +67,6 @@ release *tag:
 
 sync:
     cargo check
+
+uv-sync:
+    RUST_LOG=debug uv sync
