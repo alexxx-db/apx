@@ -82,8 +82,15 @@ jobs:
           manylinux: ${{ matrix.manylinux || 'auto' }}
           sccache: true
           before-script-linux: |
-            # manylinux_2_28 is based on AlmaLinux 8
-            yum install -y protobuf-compiler
+            # Install protoc based on available package manager
+            # Standard manylinux images use yum (AlmaLinux/RHEL)
+            # rust-cross images use apt (Ubuntu)
+            if command -v apt-get &> /dev/null; then
+              apt-get update
+              apt-get install -y protobuf-compiler
+            elif command -v yum &> /dev/null; then
+              yum install -y protobuf-compiler
+            fi
             protoc --version
 
       - name: Upload wheels
