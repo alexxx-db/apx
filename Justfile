@@ -58,3 +58,6 @@ release *tag:
     git commit -am "Release {{tag}}"
     git tag {{tag}}
     git push origin main --tags
+
+sync:
+    cargo check
