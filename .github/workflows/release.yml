@@ -15,6 +15,8 @@ jobs:
   # ============================================
   build:
     runs-on: ${{ matrix.os }}
+    env:
+      PROTOC_VERSION: "28.3"
     strategy:
       fail-fast: false
       matrix:
@@ -58,106 +60,115 @@ jobs:
         with:
           python-version-file: ".python-version"
 
+      # ============================================
+      # Preparation: Install Protoc (All Platforms)
+      # ============================================
+      # Protoc is required for building lance-encoding dependency
+      # Uses scripts/download_protoc.py for unified, platform-agnostic installation
+      # Cache key includes OS, arch, and version for proper invalidation
+      - name: Cache Protoc
+        id: cache-protoc
+        uses: actions/cache@v5
+        with:
+          path: ${{ github.workspace }}/.protoc
+          key: protoc-${{ runner.os }}-${{ runner.arch }}-${{ env.PROTOC_VERSION }}
+
+      - name: Download Protoc (script-based, unified)
+        if: steps.cache-protoc.outputs.cache-hit != 'true'
+        run: uv run --script scripts/download_protoc.py --version ${{ env.PROTOC_VERSION }} --output-dir ${{ github.workspace }}/.protoc
+
+      - name: Setup Protoc environment
+        shell: bash
+        run: |
+          # Add protoc to PATH for native builds (macOS/Windows)
+          echo "${{ github.workspace }}/.protoc/bin" >> $GITHUB_PATH
+          # Set PROTOC env var for prost-build
+          echo "PROTOC=${{ github.workspace }}/.protoc/bin/protoc" >> $GITHUB_ENV
+          # Verify installation
+          ${{ github.workspace }}/.protoc/bin/protoc --version || true
+
+      # ============================================
+      # Download Binaries (Bun)
+      # ============================================
       - name: Cache Bun binaries
         uses: actions/cache@v5
         with:
           path: .bins/bun
           key: bun-binaries-${{ hashFiles('scripts/get_binaries.py') }}
 
-      - name: Install Protoc (non-Linux)
-        if: runner.os != 'Linux'
-        uses: arduino/setup-protoc@v3
-        with:
-          version: "25.x"
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Download binaries
         run: uv run --script scripts/get_binaries.py
 
-      - name: Build wheels
-        uses: PyO3/maturin-action@v1
-        with:
-          target: ${{ matrix.target }}
-          args: --release --out dist --compression-level 9
-          manylinux: ${{ matrix.manylinux || 'auto' }}
-          sccache: true
-          before-script-linux: |
-            # Install recent protoc binary (package manager versions are too old)
-            # lance-encoding requires protoc 3.12+ for --experimental_allow_proto3_optional
-            set -e
-            PROTOC_VERSION="28.3"
-            ARCH=$(uname -m)
+  #     # ============================================
+  #     # Build Wheels - All Platforms
+  #     # ============================================
+  #     - name: Build wheels (Linux)
+  #       if: runner.os == 'Linux'
+  #       uses: PyO3/maturin-action@v1
+  #       with:
+  #         target: ${{ matrix.target }}
+  #         args: --release --out dist --compression-level 9
+  #         manylinux: ${{ matrix.manylinux }}
+  #         sccache: true
+  #         # Mount .protoc into Docker container and set PROTOC env var
+  #         # This makes the cached protoc available inside manylinux container
+  #         docker-options: -v ${{ github.workspace }}/.protoc:/protoc -e PROTOC=/protoc/bin/protoc
 
-            # Determine protoc architecture
-            if [ "$ARCH" = "x86_64" ]; then
-              PROTOC_ARCH="linux-x86_64"
-            elif [ "$ARCH" = "aarch64" ]; then
-              PROTOC_ARCH="linux-aarch_64"
-            else
-              echo "Unsupported architecture: $ARCH" && exit 1
-            fi
+  #     - name: Build wheels (macOS/Windows)
+  #       if: runner.os != 'Linux'
+  #       uses: PyO3/maturin-action@v1
+  #       with:
+  #         target: ${{ matrix.target }}
+  #         args: --release --out dist --compression-level 9
+  #         sccache: true
+  #         # Protoc already in PATH from setup step, PROTOC env var set
 
-            # Install unzip based on package manager
-            if command -v apt-get &> /dev/null; then
-              apt-get update && apt-get install -y unzip curl
-            elif command -v yum &> /dev/null; then
-              yum install -y unzip
-            fi
+  #     # ============================================
+  #     # Upload Artifacts
+  #     # ============================================
+  #     - name: Upload wheels
+  #       uses: actions/upload-artifact@v6
+  #       with:
+  #         name: wheels-${{ matrix.platform }}-${{ matrix.target }}
+  #         path: dist
 
-            # Download and install protoc
-            PROTOC_URL="https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-${PROTOC_ARCH}.zip"
-            echo "Downloading protoc from $PROTOC_URL"
-            curl -LO "$PROTOC_URL"
-            unzip -o "protoc-${PROTOC_VERSION}-${PROTOC_ARCH}.zip" -d /usr/local bin/protoc 'include/*'
-            rm "protoc-${PROTOC_VERSION}-${PROTOC_ARCH}.zip"
-            chmod +x /usr/local/bin/protoc
+  # # ============================================
+  # # Create GitHub Release
+  # # ============================================
+  # create-release:
+  #   name: Create GitHub Release
+  #   needs: build
+  #   runs-on: linux-ubuntu-latest
+  #   permissions:
+  #     contents: write
 
-            # Verify installation
-            protoc --version
+  #   steps:
+  #     - uses: actions/checkout@v6
 
-      - name: Upload wheels
-        uses: actions/upload-artifact@v6
-        with:
-          name: wheels-${{ matrix.platform }}-${{ matrix.target }}
-          path: dist
+  #     - name: Download all artifacts
+  #       uses: actions/download-artifact@v6
+  #       with:
+  #         path: dist
+  #         pattern: wheels-*
+  #         merge-multiple: true
 
-  # ============================================
-  # Create GitHub Release
-  # ============================================
-  create-release:
-    name: Create GitHub Release
-    needs: build
-    runs-on: linux-ubuntu-latest
-    permissions:
-      contents: write
+  #     - name: Create release
+  #       uses: softprops/action-gh-release@v2
+  #       with:
+  #         tag_name: ${{ github.ref_name }}
+  #         files: dist/*
+  #         generate_release_notes: true
+  #       env:
+  #         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v6
-        with:
-          path: dist
-          pattern: wheels-*
-          merge-multiple: true
-
-      - name: Create release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.ref_name }}
-          files: dist/*
-          generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  # ============================================
-  # Deploy registry
-  # ============================================
-  deploy-registry:
-    name: Deploy registry to Pages
-    needs: create-release
-    uses: ./.github/workflows/deploy-registry.yml
-    permissions:
-      contents: read
-      pages: write
-      id-token: write
+  # # ============================================
+  # # Deploy registry
+  # # ============================================
+  # deploy-registry:
+  #   name: Deploy registry to Pages
+  #   needs: create-release
+  #   uses: ./.github/workflows/deploy-registry.yml
+  #   permissions:
+  #     contents: read
+  #     pages: write
+  #     id-token: write
