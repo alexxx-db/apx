@@ -159,9 +159,8 @@ fn spawn_daemon() -> Result<u32, String> {
         .try_clone()
         .map_err(|e| format!("Failed to clone log file handle: {}", e))?;
 
-    // Get the apx command to avoid spawning via `uv run`
-    // which would create an extra process and lock the uv cache
-    let apx_cmd = crate::common::ApxCommand::new()?;
+    // Spawn apx via uv to ensure correct Python environment
+    let apx_cmd = crate::common::ApxCommand::new();
 
     debug!("Spawning flux daemon: {} flux __run", apx_cmd.display());
 
@@ -172,7 +171,7 @@ fn spawn_daemon() -> Result<u32, String> {
         .stdout(log)
         .stderr(log_stderr)
         .spawn()
-        .map_err(|e| format!("Failed to spawn daemon: {}", e))?;
+        .map_err(|e| crate::common::handle_spawn_error("apx", e))?;
 
     let pid = child.id();
     info!("Spawned flux daemon with pid={}", pid);

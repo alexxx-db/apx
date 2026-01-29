@@ -8,7 +8,7 @@ use crate::bun_binary_path;
 use crate::cli::dev::logs::LogsArgs;
 use crate::cli::dev::stop::stop_dev_server;
 use crate::cli::run_cli_async;
-use crate::common::{ApxCommand, ensure_dir, spinner, format_elapsed_ms, run_preflight_checks};
+use crate::common::{ApxCommand, ensure_dir, spinner, format_elapsed_ms, handle_spawn_error, run_preflight_checks};
 use crate::dev::client::{health, stop, wait_for_healthy, HealthCheckConfig};
 use crate::dev::common::{lock_path, read_lock, remove_lock, write_lock, DevLock, BIND_HOST};
 use crate::dev::process::ProcessManager;
@@ -189,9 +189,8 @@ pub(crate) async fn spawn_server(
     // Ensure the port is available (wait if needed)
     wait_for_port_available(port).await?;
     
-    // Get the apx command to avoid spawning via `uv run`
-    // which would create an extra process and lock the uv cache
-    let apx_cmd = ApxCommand::new()?;
+    // Spawn apx via uv to ensure correct Python environment
+    let apx_cmd = ApxCommand::new();
     
     let command = format!(
         "{} dev __internal__run_server --app-dir {} --host {} --port {}{}",
@@ -230,7 +229,7 @@ pub(crate) async fn spawn_server(
         .env("APX_OTEL_LOGS", "1")
         .env("APX_APP_DIR", &canonical_app_dir)
         .spawn()
-        .map_err(|err| format!("Failed to start dev server: {err}"))?;
+        .map_err(|err| handle_spawn_error("apx", err))?;
 
     let health_spinner = spinner("⏳ Waiting for dev server to become healthy...");
     let mut config = HealthCheckConfig::default();

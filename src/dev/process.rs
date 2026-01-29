@@ -19,7 +19,7 @@ use tokio::time::{Duration, timeout};
 use tracing::{debug, info, warn};
 
 use crate::bun_binary_path;
-use crate::common::{read_project_metadata, ApxCommand};
+use crate::common::{handle_spawn_error, read_project_metadata, ApxCommand, UvCommand};
 use crate::dev::common::CLIENT_HOST;
 use crate::dev::otel::forward_log_to_flux;
 use crate::dotenv::DotenvFile;
@@ -219,11 +219,9 @@ impl ProcessManager {
         // See entrypoint.ts for OTEL initialization.
         // ============================================================================
 
-        // Use ApxCommand to directly invoke `apx frontend dev` instead of going through
-        // `bun run dev` -> `uv run apx frontend dev`. This eliminates 2 wrapper processes.
-        let apx_cmd = ApxCommand::new()?;
-        let mut cmd = Command::new(&apx_cmd.python);
-        cmd.args(["-m", "apx", "frontend", "dev"])
+        // Use ApxCommand to invoke `apx frontend dev` via uv
+        let mut cmd = ApxCommand::new().tokio_command();
+        cmd.args(["frontend", "dev"])
             .current_dir(app_dir)
             .stdin(Stdio::null())
             // Inherit stdout/stderr for local visibility, but don't capture/forward
@@ -250,7 +248,7 @@ impl ProcessManager {
 
         let child = cmd
             .spawn()
-            .map_err(|err| format!("Failed to start frontend process: {err}"))?;
+            .map_err(|err| handle_spawn_error("apx", err))?;
 
         let mut guard = self.frontend_child.lock().await;
         *guard = Some(child);
@@ -268,12 +266,9 @@ impl ProcessManager {
         // Create uvicorn logging config for consistent log format
         let log_config = self.create_uvicorn_log_config(app_dir).await?;
 
-        // Run uvicorn directly (no OTEL auto-instrumentation wrapper)
-        let apx_cmd = ApxCommand::new()?;
-        let mut cmd = Command::new(&apx_cmd.python);
+        // Run uvicorn via uv to ensure correct Python environment
+        let mut cmd = UvCommand::new("uvicorn").tokio_command();
         cmd.args([
-            "-m",
-            "uvicorn",
             &app_entrypoint,
             "--host",
             &self.host,
@@ -309,7 +304,7 @@ impl ProcessManager {
 
         let mut child = cmd
             .spawn()
-            .map_err(|err| format!("Failed to start backend process: {err}"))?;
+            .map_err(|err| handle_spawn_error("uvicorn", err))?;
 
         // Spawn tasks to read stdout/stderr, prefix with source, and forward to flux
         let service_name = format!("{}_app", self.app_slug);
@@ -784,12 +779,9 @@ impl ProcessManager {
         let log_config = app_dir.join(".apx").join("uvicorn_logging.json");
         let log_config_str = log_config.display().to_string();
 
-        // Run uvicorn directly (no OTEL auto-instrumentation wrapper)
-        let apx_cmd = ApxCommand::new()?;
-        let mut cmd = Command::new(&apx_cmd.python);
+        // Run uvicorn via uv to ensure correct Python environment
+        let mut cmd = UvCommand::new("uvicorn").tokio_command();
         cmd.args([
-            "-m",
-            "uvicorn",
             app_entrypoint,
             "--host",
             host,
@@ -824,7 +816,7 @@ impl ProcessManager {
 
         let mut child = cmd
             .spawn()
-            .map_err(|err| format!("Failed to start backend process: {err}"))?;
+            .map_err(|err| handle_spawn_error("uvicorn", err))?;
 
         // Spawn tasks to read stdout/stderr, prefix with source, and forward to flux
         let service_name = format!("{}_app", app_slug);

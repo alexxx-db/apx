@@ -128,7 +128,10 @@ The watcher monitors your Python files and regenerates the client whenever you m
 apx provides a CLI for working with [shadcn registries](https://ui.shadcn.com/docs/registry), allowing you to add components from any shadcn-compatible registry to your project. Additional curated registries for animations, AI components, and icons are preconfigured.
 
 <Callout type="info">
-**Note:** apx does not use a `components.json` file. Component registries are configured in `pyproject.toml` under the `[tool.apx.ui.registries]` section. The [shadcn/ui](https://ui.shadcn.com/) registry is used as the default, so there's no need to add it manually.
+  **Note:** apx does not use a `components.json` file. Component registries are
+  configured in `pyproject.toml` under the `[tool.apx.ui.registries]` section.
+  The [shadcn/ui](https://ui.shadcn.com/) registry is used as the default, so
+  there's no need to add it manually.
 </Callout>
 
 ### Adding Components
@@ -256,9 +259,9 @@ def create_order(order: Order):
 
 ### Development vs Production
 
-| Environment | Database | Configuration                     |
-| ----------- | -------- | --------------------------------- |
-| Development | PGlite   | In-memory PostgreSQL sidecar      |
+| Environment | Database | Configuration                                                       |
+| ----------- | -------- | ------------------------------------------------------------------- |
+| Development | PGlite   | In-memory PostgreSQL sidecar                                        |
 | Production  | Lakebase | Configured via `PGAPPNAME` environment variable inside Apps runtime |
 
 The same SQLModel code works in both environments - apx handles the connection configuration automatically. Since PGlite is PostgreSQL-compatible, you get the same SQL behavior in development as you will in production.

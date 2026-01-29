@@ -43,44 +43,99 @@ pub fn list_profiles() -> Result<Vec<String>, String> {
     Ok(profiles)
 }
 
-/// Command to spawn an apx subprocess without going through `uv run`.
+/// Base command for running tools via `uv run`.
 ///
-/// Since `apx` is a Python entry point (not a standalone binary),
-/// `std::env::current_exe()` returns the Python interpreter. We use
-/// `python -m apx` to invoke apx as a module, avoiding the extra `uv`
-/// wrapper process and uv cache locking.
+/// Provides a consistent way to spawn subprocesses that run within
+/// the project's uv-managed Python environment.
 #[derive(Debug, Clone)]
-pub struct ApxCommand {
-    /// Path to the Python interpreter
-    pub python: PathBuf,
+pub struct UvCommand {
+    tool: &'static str,
 }
 
-impl ApxCommand {
-    /// Get the command to spawn apx subprocesses.
-    pub fn new() -> Result<Self, String> {
-        let python = std::env::current_exe()
-            .map_err(|e| format!("Failed to get current executable path: {}", e))?;
-        Ok(Self { python })
+impl UvCommand {
+    /// Create a new UvCommand for the specified tool.
+    pub fn new(tool: &'static str) -> Self {
+        Self { tool }
     }
 
-    /// Create a new std::process::Command for spawning apx.
+    /// Create a new std::process::Command for spawning the tool via uv.
     pub fn command(&self) -> std::process::Command {
-        let mut cmd = std::process::Command::new(&self.python);
-        cmd.args(["-m", "apx"]);
+        let mut cmd = std::process::Command::new("uv");
+        cmd.args(["run", self.tool]);
         cmd
     }
 
-    /// Create a new tokio::process::Command for spawning apx.
+    /// Create a new tokio::process::Command for spawning the tool via uv.
     pub fn tokio_command(&self) -> tokio::process::Command {
-        let mut cmd = tokio::process::Command::new(&self.python);
-        cmd.args(["-m", "apx"]);
+        let mut cmd = tokio::process::Command::new("uv");
+        cmd.args(["run", self.tool]);
         cmd
     }
 
     /// Format the command for display/logging.
     pub fn display(&self) -> String {
-        format!("{} -m apx", self.python.display())
+        format!("uv run {}", self.tool)
     }
+}
+
+/// Command to spawn apx subprocesses via `uv run apx`.
+///
+/// Uses uv to ensure the correct Python environment is used,
+/// regardless of which Python installations are available on the system.
+#[derive(Debug, Clone)]
+pub struct ApxCommand {
+    inner: UvCommand,
+}
+
+impl Default for ApxCommand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ApxCommand {
+    /// Create a new ApxCommand instance.
+    pub fn new() -> Self {
+        Self {
+            inner: UvCommand::new("apx"),
+        }
+    }
+
+    /// Create a new std::process::Command for spawning apx.
+    pub fn command(&self) -> std::process::Command {
+        self.inner.command()
+    }
+
+    /// Create a new tokio::process::Command for spawning apx.
+    pub fn tokio_command(&self) -> tokio::process::Command {
+        self.inner.tokio_command()
+    }
+
+    /// Format the command for display/logging.
+    pub fn display(&self) -> String {
+        self.inner.display()
+    }
+}
+
+/// Handle spawn errors with user-friendly messages.
+/// Call this when a Command::spawn() fails to provide actionable feedback.
+pub fn handle_spawn_error(tool: &str, error: std::io::Error) -> String {
+    let msg = if error.kind() == std::io::ErrorKind::NotFound {
+        format!(
+            "Failed to spawn '{}': executable not found. \
+             Make sure '{}' is installed and available in PATH.",
+            tool,
+            if tool == "apx" || tool == "uvicorn" {
+                "uv"
+            } else {
+                tool
+            }
+        )
+    } else {
+        format!("Failed to spawn '{}': {}", tool, error)
+    };
+    eprintln!("{}", msg);
+    msg
 }
 
 const DEFAULT_API_PREFIX: &str = "/api";

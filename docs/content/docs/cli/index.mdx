@@ -248,7 +248,10 @@ uv run apx dev apply <ADDON>
 A CLI for working with [shadcn registries](https://ui.shadcn.com/docs/registry). apx provides tooling to add components from any shadcn-compatible registry to your project.
 
 <Callout type="info">
-**Note:** apx does not use a `components.json` file. Component registries are configured in `pyproject.toml` under the `[tool.apx.ui.registries]` section. The [shadcn/ui](https://ui.shadcn.com/) registry is used as the default, so there's no need to add it manually.
+  **Note:** apx does not use a `components.json` file. Component registries are
+  configured in `pyproject.toml` under the `[tool.apx.ui.registries]` section.
+  The [shadcn/ui](https://ui.shadcn.com/) registry is used as the default, so
+  there's no need to add it manually.
 </Callout>
 
 ### components add
@@ -265,11 +268,11 @@ uv run apx components add [OPTIONS] <COMPONENT> [APP_PATH]
 
 #### Options
 
-| Option                  | Description                                              |
-| ----------------------- | -------------------------------------------------------- |
+| Option                  | Description                                                |
+| ----------------------- | ---------------------------------------------------------- |
 | `--registry <REGISTRY>` | Registry alias from `pyproject.toml` (e.g., `@animate-ui`) |
-| `--force`               | Overwrite existing files                                 |
-| `--dry-run`             | Print actions without writing files                      |
+| `--force`               | Overwrite existing files                                   |
+| `--dry-run`             | Print actions without writing files                        |
 
 #### Examples
 
@@ -357,7 +360,10 @@ uv run apx bun <ARGS>
 Flux OTEL collector commands for observability.
 
 <Callout type="info">
-**Note:** You typically don't need to use flux commands directly. When you run `apx dev start`, apx automatically starts the log collector and keeps it running alongside your development servers. The flux commands are provided for advanced use cases where you need manual control over the collector.
+  **Note:** You typically don't need to use flux commands directly. When you run
+  `apx dev start`, apx automatically starts the log collector and keeps it
+  running alongside your development servers. The flux commands are provided for
+  advanced use cases where you need manual control over the collector.
 </Callout>
 
 ### flux start

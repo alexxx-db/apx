@@ -103,7 +103,7 @@ The core of `apx` is written in Rust. Below is the complete list of Rust crates 
 | biome_css_syntax               | CSS syntax tree definitions for parsing                                  | MIT                  | [GitHub](https://github.com/biomejs/biome)                     |
 | biome_rowan                    | Red-green tree library for syntax analysis                               | MIT                  | [GitHub](https://github.com/biomejs/biome)                     |
 | url                            | URL parsing and manipulation                                             | MIT/Apache-2.0       | [GitHub](https://github.com/servo/rust-url)                    |
-| lancedb                        | Vector database with search capabilities  (used in mcp search)           | Apache-2.0           | [GitHub](https://github.com/lancedb/lancedb)                   |
+| lancedb                        | Vector database with search capabilities (used in mcp search)            | Apache-2.0           | [GitHub](https://github.com/lancedb/lancedb)                   |
 | arrow                          | Apache Arrow columnar data format implementation                         | Apache-2.0           | [GitHub](https://github.com/apache/arrow-rs)                   |
 | lance-index                    | Lance index implementation for vector search                             | Apache-2.0           | [GitHub](https://github.com/lancedb/lance)                     |
 | zip                            | ZIP archive reading/writing for packaging                                | MIT                  | [GitHub](https://github.com/zip-rs/zip2)                       |
