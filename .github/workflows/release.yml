@@ -11,159 +11,102 @@ permissions:
 
 jobs:
   # ============================================
-  # Linux builds (using manylinux containers)
+  # Build wheels for all platforms
   # ============================================
-  linux:
-    runs-on: linux-ubuntu-latest
+  build:
+    runs-on: ${{ matrix.os }}
     strategy:
-      matrix:
-        target:
-          - x86_64
-          - aarch64
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version-file: ".python-version"
-
-      - name: Download binaries
-        run: |
-          pip install httpx typer
-          python scripts/get_binaries.py
-
-      - name: Build wheels
-        uses: PyO3/maturin-action@v1
-        with:
-          target: ${{ matrix.target }}
-          args: --release --out dist --compression-level 9
-          manylinux: "2_28"
-          sccache: false
-          before-script-linux: |
-            # Install protoc inside the manylinux container
-            # Try package manager first, then fall back to direct download
-            if command -v yum &> /dev/null; then
-              yum install -y protobuf-compiler || true
-            elif command -v dnf &> /dev/null; then
-              dnf install -y protobuf-compiler || true
-            elif command -v apk &> /dev/null; then
-              apk add --no-cache protobuf || true
-            fi
-            # Fallback: download protoc binary directly if not available
-            if ! command -v protoc &> /dev/null; then
-              PROTOC_VERSION="25.1"
-              ARCH=$(uname -m)
-              if [ "$ARCH" = "x86_64" ]; then
-                PROTOC_ARCH="linux-x86_64"
-              elif [ "$ARCH" = "aarch64" ]; then
-                PROTOC_ARCH="linux-aarch_64"
-              fi
-              curl -LO "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-${PROTOC_ARCH}.zip"
-              unzip -o "protoc-${PROTOC_VERSION}-${PROTOC_ARCH}.zip" -d /usr/local
-              rm "protoc-${PROTOC_VERSION}-${PROTOC_ARCH}.zip"
-            fi
-            echo "protoc version: $(protoc --version)"
-
-      - name: Upload wheels
-        uses: actions/upload-artifact@v4
-        with:
-          name: wheels-linux-${{ matrix.target }}
-          path: dist/*.whl
-
-  # ============================================
-  # macOS builds (native runners)
-  # ============================================
-  macos:
-    runs-on: ${{ matrix.runner }}
-    strategy:
+      fail-fast: false
       matrix:
         include:
-          - runner: macos-13
-            target: x86_64-apple-darwin
-          - runner: macos-latest
-            target: aarch64-apple-darwin
-    steps:
-      - uses: actions/checkout@v4
+          # Linux x86_64
+          - os: linux-ubuntu-latest
+            target: x86_64
+            platform: linux
+            manylinux: "2_28"
 
-      - uses: actions/setup-python@v5
+          # Linux aarch64
+          - os: linux-ubuntu-latest
+            target: aarch64
+            platform: linux
+            manylinux: "2_28"
+
+          # macOS x86_64 (Intel)
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            platform: macos
+
+          # macOS aarch64 (Apple Silicon)
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            platform: macos
+
+          # Windows x64
+          - os: windows-latest
+            target: x64
+            platform: windows
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - uses: actions/setup-python@v6
         with:
           python-version-file: ".python-version"
 
-      - name: Install Protoc
+      - name: Cache Bun binaries
+        uses: actions/cache@v5
+        with:
+          path: .bins/bun
+          key: bun-binaries-${{ hashFiles('scripts/get_binaries.py') }}
+
+      - name: Install Protoc (non-Linux)
+        if: runner.os != 'Linux'
         uses: arduino/setup-protoc@v3
         with:
           version: "25.x"
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Download binaries
-        run: |
-          pip install httpx typer
-          python scripts/get_binaries.py
+        run: uv run --script scripts/get_binaries.py
 
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.target }}
           args: --release --out dist --compression-level 9
-          sccache: false
+          manylinux: ${{ matrix.manylinux || 'auto' }}
+          sccache: true
+          before-script-linux: |
+            # manylinux_2_28 is based on AlmaLinux 8
+            yum install -y protobuf-compiler
+            protoc --version
 
       - name: Upload wheels
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
-          name: wheels-macos-${{ matrix.target }}
-          path: dist/*.whl
-
-  # ============================================
-  # Windows builds
-  # ============================================
-  windows:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version-file: ".python-version"
-
-      - name: Install Protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          version: "25.x"
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Download binaries
-        run: |
-          pip install httpx typer
-          python scripts/get_binaries.py
-
-      - name: Build wheels
-        uses: PyO3/maturin-action@v1
-        with:
-          target: x64
-          args: --release --out dist --compression-level 9
-          sccache: false
-
-      - name: Upload wheels
-        uses: actions/upload-artifact@v4
-        with:
-          name: wheels-windows-x64
-          path: dist/*.whl
+          name: wheels-${{ matrix.platform }}-${{ matrix.target }}
+          path: dist
 
   # ============================================
   # Create GitHub Release
   # ============================================
   create-release:
     name: Create GitHub Release
-    needs: [linux, macos, windows]
+    needs: build
     runs-on: linux-ubuntu-latest
     permissions:
       contents: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - name: Download wheels
-        uses: actions/download-artifact@v4
+      - name: Download all artifacts
+        uses: actions/download-artifact@v6
         with:
           path: dist
           pattern: wheels-*
@@ -173,7 +116,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          files: dist/*.whl
+          files: dist/*
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
