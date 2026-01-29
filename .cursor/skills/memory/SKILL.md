@@ -31,7 +31,7 @@ Saves a memo of the current conversation to a memory file.
 
 ## Memory File Format
 
-```markdown
+````markdown
 ---
 name: <memory-id>
 created: <YYYY-MM-DD>
@@ -56,6 +56,7 @@ tags: [<relevant>, <tags>]
 graph TD
     A[Component] --> B[Component]
 ```
+````
 
 ## Relevant Files
 
@@ -67,7 +68,8 @@ graph TD
 ## Notes
 
 <Any additional notes, caveats, or follow-up items>
-```
+
+````
 
 ## Guidelines
 
@@ -106,7 +108,7 @@ graph LR
     API --> Cache{Redis}
     Cache -->|miss| DB[(Database)]
     Cache -->|hit| API
-```
+````
 
 ## Relevant Files
 
@@ -118,4 +120,7 @@ graph LR
 
 - Consider adding cache invalidation on data updates
 - Monitor cache hit rates after deployment
+
+```
+
 ```

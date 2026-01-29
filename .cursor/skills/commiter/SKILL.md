@@ -18,24 +18,25 @@ Create well-formatted git commits using the `just pm` command with emoji prefixe
 
 Use ONLY these emojis for commit messages:
 
-| Emoji | Code | Type | Description |
-|-------|------|------|-------------|
-| ✨ | `:sparkles:` | feat | New feature or capability |
-| 🐛 | `:bug:` | fix | Bug fix |
-| 🔧 | `:wrench:` | chore | Configuration, tooling, or maintenance |
-| 📝 | `:memo:` | docs | Documentation changes |
-| ♻️ | `:recycle:` | refactor | Code refactoring without behavior change |
-| 🎨 | `:art:` | style | Code style, formatting, structure |
-| ✅ | `:white_check_mark:` | test | Adding or updating tests |
-| 🚀 | `:rocket:` | perf | Performance improvements |
-| 🔒 | `:lock:` | security | Security fixes or improvements |
-| ⬆️ | `:arrow_up:` | deps | Dependency updates |
-| 🗑️ | `:wastebasket:` | remove | Removing code or files |
-| 🚧 | `:construction:` | wip | Work in progress |
+| Emoji | Code                 | Type     | Description                              |
+| ----- | -------------------- | -------- | ---------------------------------------- |
+| ✨    | `:sparkles:`         | feat     | New feature or capability                |
+| 🐛    | `:bug:`              | fix      | Bug fix                                  |
+| 🔧    | `:wrench:`           | chore    | Configuration, tooling, or maintenance   |
+| 📝    | `:memo:`             | docs     | Documentation changes                    |
+| ♻️    | `:recycle:`          | refactor | Code refactoring without behavior change |
+| 🎨    | `:art:`              | style    | Code style, formatting, structure        |
+| ✅    | `:white_check_mark:` | test     | Adding or updating tests                 |
+| 🚀    | `:rocket:`           | perf     | Performance improvements                 |
+| 🔒    | `:lock:`             | security | Security fixes or improvements           |
+| ⬆️    | `:arrow_up:`         | deps     | Dependency updates                       |
+| 🗑️    | `:wastebasket:`      | remove   | Removing code or files                   |
+| 🚧    | `:construction:`     | wip      | Work in progress                         |
 
 ## Instructions
 
 1. **Gather context** - Run these commands to understand the changes:
+
    ```bash
    git status
    git diff --staged
@@ -64,6 +65,7 @@ Use ONLY these emojis for commit messages:
 ## Examples
 
 Good commit messages:
+
 - `✨ feat: add user authentication endpoint`
 - `🐛 fix: resolve null pointer in config parser`
 - `📝 docs: update API documentation for v2`
@@ -73,6 +75,7 @@ Good commit messages:
 - `⬆️ deps: bump fastapi to 0.110.0`
 
 Bad commit messages (avoid these):
+
 - `fix stuff` (too vague)
 - `✨ feat: Added the new feature for users` (past tense, too long)
 - `🎉 party: celebrate` (wrong emoji, wrong type)
@@ -84,6 +87,7 @@ If changes span multiple categories, choose the primary one or suggest splitting
 ## Pre-Commit Checklist
 
 Before committing, verify:
+
 - [ ] All changes are intentional (review `git diff`)
 - [ ] No sensitive data (credentials, secrets) in staged files
 - [ ] The commit message accurately describes the changes
