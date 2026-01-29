@@ -55,7 +55,7 @@ release *tag:
     # Update Cargo.toml with the tag version (remove 'v' prefix)
     VERSION=$(echo "{{tag}}" | sed 's/^v//')
     cargo set-version $VERSION
-    git commit -am "Release {{tag}}"
+    git commit -am "Release {{tag}} [skip ci]"
     git tag {{tag}}
     git push origin main --tags
 

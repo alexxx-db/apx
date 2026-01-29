@@ -9,6 +9,10 @@ const BUN_BIN_DIR: &str = ".bins/bun";
 const OUTPUT_DIR: &str = "src/apx/binaries";
 
 fn main() {
+    // Set PROTOC to compiled binary for prost/opentelemetry-proto compilation
+    // SAFETY: This is safe in a build script - single-threaded environment
+    unsafe { env::set_var("PROTOC", protobuf_src::protoc()) };
+
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap_or_default());
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
