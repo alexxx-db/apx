@@ -25,26 +25,26 @@ jobs:
             platform: linux
             manylinux: "2_28"
 
-          # Linux aarch64
-          - os: linux-ubuntu-latest
-            target: aarch64
-            platform: linux
-            manylinux: "2_28"
+          # # Linux aarch64
+          # - os: linux-ubuntu-latest
+          #   target: aarch64
+          #   platform: linux
+          #   manylinux: "2_28"
 
-          # macOS x86_64 (Intel)
-          - os: macos-15-intel
-            target: x86_64-apple-darwin
-            platform: macos
+          # # macOS x86_64 (Intel)
+          # - os: macos-15-intel
+          #   target: x86_64-apple-darwin
+          #   platform: macos
 
-          # macOS aarch64 (Apple Silicon)
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            platform: macos
+          # # macOS aarch64 (Apple Silicon)
+          # - os: macos-latest
+          #   target: aarch64-apple-darwin
+          #   platform: macos
 
-          # Windows x64
-          - os: windows-latest
-            target: x64
-            platform: windows
+          # # Windows x64
+          # - os: windows-latest
+          #   target: x64
+          #   platform: windows
 
     steps:
       - uses: actions/checkout@v6
