@@ -5,11 +5,6 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  # Enable sccache for faster builds
-  SCCACHE_GHA_ENABLED: "true"
-  RUSTC_WRAPPER: "sccache"
-  # Disable incremental compilation (incompatible with sccache)
-  CARGO_INCREMENTAL: "0"
 
 jobs:
   test:
@@ -27,16 +22,11 @@ jobs:
           toolchain: "1.88.0"
           components: rustfmt, clippy
 
-      - name: Run sccache-cache
-        uses: mozilla-actions/sccache-action@v0.0.9
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v3
         with:
-          shared-key: "ci-linux"
-          cache-all-crates: "true"
-          # Only save cache on main branch to prevent fragmentation
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          version: "25.x"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
@@ -65,17 +55,18 @@ jobs:
       - name: Prepare virtual environment
         run: uv venv
 
-      - name: Install maturin
-        run: uv tool install maturin
-
       - name: Download binaries
         run: uv run --script scripts/get_binaries.py
 
       - name: Install just
         uses: extractions/setup-just@v2
 
-      - name: Build project in development mode
-        run: maturin develop --uv
+      - name: Build with maturin
+        uses: PyO3/maturin-action@v1
+        with:
+          command: develop
+          args: --uv
+          sccache: true
 
       - name: Configure git for tests
         run: |
