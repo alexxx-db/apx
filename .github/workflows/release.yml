@@ -80,7 +80,7 @@ jobs:
         run: uv run --script scripts/get_binaries.py
 
       - name: Build wheels
-        run: maturin build --release --locked --out dist
+        run: maturin build --release --out dist --compression-level 9
 
       - name: Upload wheels
         uses: actions/upload-artifact@v4
