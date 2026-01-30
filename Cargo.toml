@@ -86,7 +86,7 @@ schemars = "1.2.0"
 
 [package]
 name = "apx"
-version.workspace = true
+version = "0.2.0"
 edition.workspace = true
 rust-version.workspace = true
 build = "build.rs"
