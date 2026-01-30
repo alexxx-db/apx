@@ -46,6 +46,9 @@ jobs:
         run: bun run build
         working-directory: docs
 
+      - name: Copy docs to .pages
+        run: mv docs/.pages .pages
+
       - name: Generate registry
         run: uv run --script scripts/generate_registry.py
 

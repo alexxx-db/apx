@@ -5,7 +5,7 @@ const withMDX = createMDX();
 /** @type {import('next').NextConfig} */
 const config = {
   output: "export",
-  distDir: "./.pages",
+  distDir: ".pages",
   reactStrictMode: true,
   basePath: "/apx",
   assetPrefix: "/apx",

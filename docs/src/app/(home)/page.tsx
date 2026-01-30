@@ -38,7 +38,7 @@ export default function HomePage() {
   return (
     <main className="flex flex-1 flex-col">
       {/* Hero Section */}
-      <section className="flex flex-col items-center justify-center px-6 py-16 md:py-24 text-center h-screen">
+      <section className="flex flex-col items-center justify-center px-6 py-16 md:py-24 text-center min-h-screen">
         {/* Logo */}
         <div className="mb-8">
           <Image
