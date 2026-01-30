@@ -32,7 +32,11 @@
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts",
     "../.pages/types/**/*.ts",
-    "../.pages/dev/types/**/*.ts"
+    "../.pages/dev/types/**/*.ts",
+    ".pages/types/**/*.ts",
+    ".pages/dev/types/**/*.ts",
+    "./.pages/types/**/*.ts",
+    "./.pages/dev/types/**/*.ts"
   ],
   "exclude": ["node_modules"]
 }
