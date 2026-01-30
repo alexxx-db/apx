@@ -863,14 +863,13 @@ fn resolve_app_name_from_databricks_yml(project_dir: &Path) -> Result<String, St
 
     let mut app_names = HashSet::new();
     for app_def in apps_obj.values() {
-        if let Some(app_obj) = app_def.as_object() {
-            if let Some(name_val) = app_obj.get("name") {
-                if let Some(name_str) = name_val.as_str() {
-                    let name = name_str.trim();
-                    if !name.is_empty() {
-                        app_names.insert(name.to_string());
-                    }
-                }
+        if let Some(app_obj) = app_def.as_object()
+            && let Some(name_val) = app_obj.get("name")
+            && let Some(name_str) = name_val.as_str()
+        {
+            let name = name_str.trim();
+            if !name.is_empty() {
+                app_names.insert(name.to_string());
             }
         }
     }
@@ -1115,13 +1114,12 @@ async fn get_route_info_tool(ctx: Arc<AppContext>, args: GetRouteInfoArgs) -> To
     for (_, path_item) in paths {
         if let Some(methods_obj) = path_item.as_object() {
             for (method, operation) in methods_obj {
-                if let Some(operation_obj) = operation.as_object() {
-                    if let Some(op_id) = operation_obj.get("operationId").and_then(|v| v.as_str()) {
-                        if op_id == args.operation_id {
-                            found_method = Some(method.to_uppercase());
-                            break;
-                        }
-                    }
+                if let Some(operation_obj) = operation.as_object()
+                    && let Some(op_id) = operation_obj.get("operationId").and_then(|v| v.as_str())
+                    && op_id == args.operation_id
+                {
+                    found_method = Some(method.to_uppercase());
+                    break;
                 }
             }
             if found_method.is_some() {

@@ -413,10 +413,11 @@ impl<C: Send + Sync + 'static> McpServer<C> {
     }
 
     async fn handle_message(&self, msg: &str) -> Option<String> {
-        if let Ok(notification) = serde_json::from_str::<JsonRpcNotification>(msg) {
-            if notification.is_valid() && notification.method == "notifications/initialized" {
-                return None;
-            }
+        if let Ok(notification) = serde_json::from_str::<JsonRpcNotification>(msg)
+            && notification.is_valid()
+            && notification.method == "notifications/initialized"
+        {
+            return None;
         }
 
         let request: JsonRpcRequest = match serde_json::from_str(msg) {

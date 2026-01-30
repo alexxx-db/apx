@@ -42,13 +42,13 @@ impl DotenvFile {
                 )
             })?;
 
-            if let DotenvLine::Variable { key, .. } = &parsed {
-                if !seen_keys.insert(key.clone()) {
-                    return Err(format!(
-                        "Duplicate variable '{key}' in dotenv file {}",
-                        path.display()
-                    ));
-                }
+            if let DotenvLine::Variable { key, .. } = &parsed
+                && !seen_keys.insert(key.clone())
+            {
+                return Err(format!(
+                    "Duplicate variable '{key}' in dotenv file {}",
+                    path.display()
+                ));
             }
 
             lines.push(parsed);
@@ -82,13 +82,12 @@ impl DotenvFile {
                 value: existing_value,
                 raw,
             } = line
+                && existing == key
             {
-                if existing == key {
-                    *existing_value = value.to_string();
-                    *raw = format!("{key}={value}");
-                    updated = true;
-                    break;
-                }
+                *existing_value = value.to_string();
+                *raw = format!("{key}={value}");
+                updated = true;
+                break;
             }
         }
 
@@ -104,15 +103,15 @@ impl DotenvFile {
     }
 
     fn write(&self) -> Result<(), String> {
-        if let Some(parent) = self.path.parent() {
-            if !parent.as_os_str().is_empty() {
-                fs::create_dir_all(parent).map_err(|err| {
-                    format!(
-                        "Failed to create dotenv directory {}: {err}",
-                        parent.display()
-                    )
-                })?;
-            }
+        if let Some(parent) = self.path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            fs::create_dir_all(parent).map_err(|err| {
+                format!(
+                    "Failed to create dotenv directory {}: {err}",
+                    parent.display()
+                )
+            })?;
         }
 
         let contents = self

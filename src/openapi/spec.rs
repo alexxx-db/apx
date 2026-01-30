@@ -218,19 +218,19 @@ impl Schema {
         // Check anyOf for null type
         if let Some(any_of) = &self.any_of {
             for schema in any_of {
-                if let Some(SchemaType::Single(t)) = &schema.schema_type {
-                    if t == "null" {
-                        return true;
-                    }
+                if let Some(SchemaType::Single(t)) = &schema.schema_type
+                    && t == "null"
+                {
+                    return true;
                 }
             }
         }
 
         // Check type array for null
-        if let Some(SchemaType::Multiple(types)) = &self.schema_type {
-            if types.iter().any(|t| t == "null") {
-                return true;
-            }
+        if let Some(SchemaType::Multiple(types)) = &self.schema_type
+            && types.iter().any(|t| t == "null")
+        {
+            return true;
         }
 
         false
@@ -240,10 +240,10 @@ impl Schema {
     pub fn unwrap_nullable(&self) -> Option<&Schema> {
         if let Some(any_of) = &self.any_of {
             for schema in any_of {
-                if let Some(SchemaType::Single(t)) = &schema.schema_type {
-                    if t != "null" {
-                        return Some(schema);
-                    }
+                if let Some(SchemaType::Single(t)) = &schema.schema_type
+                    && t != "null"
+                {
+                    return Some(schema);
                 }
                 // If it's a ref or complex schema, return it
                 if schema.ref_path.is_some() || schema.properties.is_some() {

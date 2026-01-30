@@ -298,11 +298,11 @@ fn parse_rst_content(rst_content: &str) -> (String, String, String, String, Vec<
                 output.extend(parsed.text_fragments);
 
                 // Collect metadata (keep first entity/service, collect all operations)
-                if entity.is_empty() {
-                    if let Some(e) = parsed.entity {
-                        entity = e.clone();
-                        symbols.push(e);
-                    }
+                if entity.is_empty()
+                    && let Some(e) = parsed.entity
+                {
+                    entity = e.clone();
+                    symbols.push(e);
                 }
                 if let Some(s) = parsed.service {
                     if service.is_empty() {
@@ -371,10 +371,10 @@ fn extract_metadata(
     let (text, entity, operation, mut service, mut symbols) = parse_rst_content(rst_content);
 
     // Fallback: extract service from file path if not found in content
-    if service.is_empty() {
-        if let Some(stem) = Path::new(file_path).file_stem() {
-            service = stem.to_string_lossy().to_lowercase();
-        }
+    if service.is_empty()
+        && let Some(stem) = Path::new(file_path).file_stem()
+    {
+        service = stem.to_string_lossy().to_lowercase();
     }
 
     // Add service to symbols for matching

@@ -157,12 +157,12 @@ async fn get_base_version(app_path: &Path) -> String {
         .output()
         .await;
 
-    if let Ok(result) = output {
-        if result.status.success() {
-            let stdout = String::from_utf8_lossy(&result.stdout).trim().to_string();
-            if !stdout.is_empty() {
-                return stdout;
-            }
+    if let Ok(result) = output
+        && result.status.success()
+    {
+        let stdout = String::from_utf8_lossy(&result.stdout).trim().to_string();
+        if !stdout.is_empty() {
+            return stdout;
         }
     }
 

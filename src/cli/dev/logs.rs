@@ -227,10 +227,10 @@ async fn follow_logs(
                 }
 
                 // Update last_id
-                if let Ok(new_id) = storage.get_latest_id() {
-                    if new_id > last_id {
-                        last_id = new_id;
-                    }
+                if let Ok(new_id) = storage.get_latest_id()
+                    && new_id > last_id
+                {
+                    last_id = new_id;
                 }
 
                 // Check if server was running but lockfile is now gone

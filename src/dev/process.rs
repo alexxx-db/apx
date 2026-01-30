@@ -607,10 +607,10 @@ impl ProcessManager {
             ];
 
             for file in &watched_files {
-                if file.exists() {
-                    if let Err(e) = watcher.watch(file, RecursiveMode::NonRecursive) {
-                        warn!("Failed to watch file {:?}: {}", file, e);
-                    }
+                if file.exists()
+                    && let Err(e) = watcher.watch(file, RecursiveMode::NonRecursive)
+                {
+                    warn!("Failed to watch file {:?}: {}", file, e);
                 }
             }
 
@@ -916,11 +916,11 @@ impl ProcessManager {
     /// Send SIGTERM to a child process tree (polite shutdown request).
     async fn send_sigterm(name: &str, child: &Arc<Mutex<Option<Child>>>) {
         let guard = child.lock().await;
-        if let Some(child) = guard.as_ref() {
-            if let Some(pid) = child.id() {
-                debug!(process = name, pid, "Sending SIGTERM to process tree.");
-                Self::send_signal_to_tree(pid, Signal::Term, name.to_string()).await;
-            }
+        if let Some(child) = guard.as_ref()
+            && let Some(pid) = child.id()
+        {
+            debug!(process = name, pid, "Sending SIGTERM to process tree.");
+            Self::send_signal_to_tree(pid, Signal::Term, name.to_string()).await;
         }
     }
 

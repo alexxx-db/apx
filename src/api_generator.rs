@@ -137,12 +137,11 @@ pub fn start_openapi_watcher(
                                     continue;
                                 }
                                 has_python_change = true;
-                                if let Ok(metadata) = fs::metadata(path) {
-                                    if let Ok(modified) = metadata.modified() {
-                                        if last_mtime.is_none_or(|current| modified > current) {
-                                            last_mtime = Some(modified);
-                                        }
-                                    }
+                                if let Ok(metadata) = fs::metadata(path)
+                                    && let Ok(modified) = metadata.modified()
+                                    && last_mtime.is_none_or(|current| modified > current)
+                                {
+                                    last_mtime = Some(modified);
                                 }
                             }
                             if has_python_change {
@@ -266,12 +265,11 @@ fn latest_python_mtime(root: &Path) -> Option<SystemTime> {
         if !is_python_path(&path) {
             continue;
         }
-        if let Ok(metadata) = fs::metadata(&path) {
-            if let Ok(modified) = metadata.modified() {
-                if latest.is_none_or(|current| modified > current) {
-                    latest = Some(modified);
-                }
-            }
+        if let Ok(metadata) = fs::metadata(&path)
+            && let Ok(modified) = metadata.modified()
+            && latest.is_none_or(|current| modified > current)
+        {
+            latest = Some(modified);
         }
     }
     latest

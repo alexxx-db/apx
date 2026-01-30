@@ -147,14 +147,15 @@ fn normalize_schema_to_typedef(name: &str, schema: &Schema) -> Result<TsTypeDef,
     }
 
     // Check for plain object (interface candidate)
-    if schema.properties.is_some() && schema.additional_properties.is_none() {
-        if let Some(properties) = &schema.properties {
-            let props = normalize_properties(properties, schema.required.as_ref())?;
-            return Ok(TsTypeDef {
-                name: name.to_string(),
-                kind: TypeDefKind::Interface { properties: props },
-            });
-        }
+    if schema.properties.is_some()
+        && schema.additional_properties.is_none()
+        && let Some(properties) = &schema.properties
+    {
+        let props = normalize_properties(properties, schema.required.as_ref())?;
+        return Ok(TsTypeDef {
+            name: name.to_string(),
+            kind: TypeDefKind::Interface { properties: props },
+        });
     }
 
     // Everything else becomes a type alias
@@ -292,10 +293,10 @@ fn normalize_intersection(schemas: &[Schema]) -> Result<TsType, String> {
     if types.is_empty() {
         return Ok(TsType::Primitive(TsPrimitive::Unknown));
     }
-    if types.len() == 1 {
-        if let Some(ty) = types.pop() {
-            return Ok(ty);
-        }
+    if types.len() == 1
+        && let Some(ty) = types.pop()
+    {
+        return Ok(ty);
     }
 
     Ok(TsType::Intersection(types))
@@ -605,40 +606,40 @@ fn normalize_param(p: &Parameter) -> ParamIR {
 
 /// Normalize request body - detects content type and returns BodyIR
 fn normalize_body(op: &Operation) -> Result<Option<BodyIR>, String> {
-    if let Some(body) = &op.request_body {
-        if let Some(content) = &body.content {
-            // Check for multipart/form-data first
-            if let Some(media_type) = content.get("multipart/form-data") {
-                if let Some(schema) = &media_type.schema {
-                    let ty = schema_to_ts_type(schema)?;
-                    return Ok(Some(BodyIR {
-                        ty: TypeRef::Inline(Box::new(ty)),
-                        content_type: BodyContentType::FormData,
-                    }));
-                }
-            }
+    if let Some(body) = &op.request_body
+        && let Some(content) = &body.content
+    {
+        // Check for multipart/form-data first
+        if let Some(media_type) = content.get("multipart/form-data")
+            && let Some(schema) = &media_type.schema
+        {
+            let ty = schema_to_ts_type(schema)?;
+            return Ok(Some(BodyIR {
+                ty: TypeRef::Inline(Box::new(ty)),
+                content_type: BodyContentType::FormData,
+            }));
+        }
 
-            // Check for application/x-www-form-urlencoded
-            if let Some(media_type) = content.get("application/x-www-form-urlencoded") {
-                if let Some(schema) = &media_type.schema {
-                    let ty = schema_to_ts_type(schema)?;
-                    return Ok(Some(BodyIR {
-                        ty: TypeRef::Inline(Box::new(ty)),
-                        content_type: BodyContentType::UrlEncoded,
-                    }));
-                }
-            }
+        // Check for application/x-www-form-urlencoded
+        if let Some(media_type) = content.get("application/x-www-form-urlencoded")
+            && let Some(schema) = &media_type.schema
+        {
+            let ty = schema_to_ts_type(schema)?;
+            return Ok(Some(BodyIR {
+                ty: TypeRef::Inline(Box::new(ty)),
+                content_type: BodyContentType::UrlEncoded,
+            }));
+        }
 
-            // Check for application/json
-            if let Some(media_type) = content.get("application/json") {
-                if let Some(schema) = &media_type.schema {
-                    let ty = schema_to_ts_type(schema)?;
-                    return Ok(Some(BodyIR {
-                        ty: TypeRef::Inline(Box::new(ty)),
-                        content_type: BodyContentType::Json,
-                    }));
-                }
-            }
+        // Check for application/json
+        if let Some(media_type) = content.get("application/json")
+            && let Some(schema) = &media_type.schema
+        {
+            let ty = schema_to_ts_type(schema)?;
+            return Ok(Some(BodyIR {
+                ty: TypeRef::Inline(Box::new(ty)),
+                content_type: BodyContentType::Json,
+            }));
         }
     }
     Ok(None)
@@ -675,20 +676,20 @@ fn normalize_response(op: &Operation) -> Result<ResponseIR, String> {
     let status_codes = ["200", "201", "202", "203", "206", "207", "default", "2XX"];
 
     for status in status_codes {
-        if let Some(response) = op.responses.get(status) {
-            if let Some(content) = &response.content {
-                // Find the first content type that has a schema
-                for (media_type_str, media_type) in content {
-                    if let Some(schema) = &media_type.schema {
-                        let ty = schema_to_ts_type(schema)?;
-                        let content_type = detect_response_content_type(media_type_str);
+        if let Some(response) = op.responses.get(status)
+            && let Some(content) = &response.content
+        {
+            // Find the first content type that has a schema
+            for (media_type_str, media_type) in content {
+                if let Some(schema) = &media_type.schema {
+                    let ty = schema_to_ts_type(schema)?;
+                    let content_type = detect_response_content_type(media_type_str);
 
-                        return Ok(ResponseIR {
-                            ty: TypeRef::Inline(Box::new(ty)),
-                            content_type,
-                            has_void_status,
-                        });
-                    }
+                    return Ok(ResponseIR {
+                        ty: TypeRef::Inline(Box::new(ty)),
+                        content_type,
+                        has_void_status,
+                    });
                 }
             }
         }

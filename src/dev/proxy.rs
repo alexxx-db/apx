@@ -468,11 +468,11 @@ async fn proxy_websocket(
                 match upstream_msg {
                     Some(Ok(message)) => {
                         debug!("Proxy websocket upstream message.");
-                        if let Some(mapped) = tungstenite_to_axum(message) {
-                            if let Err(err) = downstream.send(mapped).await {
-                                warn!(error = %err, "Failed to send websocket message downstream.");
-                                break;
-                            }
+                        if let Some(mapped) = tungstenite_to_axum(message)
+                            && let Err(err) = downstream.send(mapped).await
+                        {
+                            warn!(error = %err, "Failed to send websocket message downstream.");
+                            break;
                         }
                     }
                     Some(Err(err)) => {

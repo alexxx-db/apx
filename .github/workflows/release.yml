@@ -59,7 +59,7 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: "1.88.0"
+          toolchain: "1.92.0"
 
       # ============================================
       # Cache Cargo dependencies
@@ -157,7 +157,7 @@ jobs:
           target: ${{ matrix.target }}
           args: --release --out dist --compression-level 9
           manylinux: ${{ matrix.manylinux }}
-          rust-toolchain: "1.88.0"
+          rust-toolchain: "1.92.0"
           sccache: true
           docker-options: >-
             -v ${{ github.workspace }}/.protoc:/protoc
@@ -170,7 +170,7 @@ jobs:
         with:
           target: ${{ matrix.target }}
           args: --release --out dist --compression-level 9
-          rust-toolchain: "1.88.0"
+          rust-toolchain: "1.92.0"
           sccache: true
           # Protoc already in PATH from setup step, PROTOC env var set
 

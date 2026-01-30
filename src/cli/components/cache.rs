@@ -459,17 +459,17 @@ async fn fetch_and_cache_registry_index(
 /// Check if any registry.json files need refresh (older than 1 hour)
 pub fn needs_registry_refresh(registries: &HashMap<String, RegistryConfig>) -> bool {
     // Check default registry
-    if let Ok(path) = get_registry_index_path(None) {
-        if !is_file_fresh(&path, CACHE_TTL_HOURS) {
-            return true;
-        }
+    if let Ok(path) = get_registry_index_path(None)
+        && !is_file_fresh(&path, CACHE_TTL_HOURS)
+    {
+        return true;
     }
     // Check custom registries
     for registry_name in registries.keys() {
-        if let Ok(path) = get_registry_index_path(Some(registry_name)) {
-            if !is_file_fresh(&path, CACHE_TTL_HOURS) {
-                return true;
-            }
+        if let Ok(path) = get_registry_index_path(Some(registry_name))
+            && !is_file_fresh(&path, CACHE_TTL_HOURS)
+        {
+            return true;
         }
     }
     false

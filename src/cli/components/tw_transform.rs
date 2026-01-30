@@ -92,10 +92,10 @@ fn fix_double_brackets(content: &str) -> String {
     while let Some(c) = chars.next() {
         result.push(c);
         // If we just pushed a ] and the next char is also ], skip one
-        if c == ']' {
-            if let Some(&']') = chars.peek() {
-                chars.next(); // skip the duplicate ]
-            }
+        if c == ']'
+            && let Some(&']') = chars.peek()
+        {
+            chars.next(); // skip the duplicate ]
         }
     }
 

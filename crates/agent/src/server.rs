@@ -174,20 +174,20 @@ fn parse_json_logs(body: &[u8]) -> Result<Vec<LogRecord>, String> {
         let mut app_path = None;
         let mut resource_attrs_json = None;
 
-        if let Some(resource) = resource_log.get("resource") {
-            if let Some(attrs) = resource.get("attributes").and_then(|v| v.as_array()) {
-                let attrs_clone = attrs.clone();
-                resource_attrs_json = Some(serde_json::to_string(&attrs_clone).unwrap_or_default());
+        if let Some(resource) = resource_log.get("resource")
+            && let Some(attrs) = resource.get("attributes").and_then(|v| v.as_array())
+        {
+            let attrs_clone = attrs.clone();
+            resource_attrs_json = Some(serde_json::to_string(&attrs_clone).unwrap_or_default());
 
-                for attr in attrs {
-                    let key = attr.get("key").and_then(|v| v.as_str()).unwrap_or("");
-                    let value = extract_any_value(attr.get("value"));
+            for attr in attrs {
+                let key = attr.get("key").and_then(|v| v.as_str()).unwrap_or("");
+                let value = extract_any_value(attr.get("value"));
 
-                    match key {
-                        "service.name" => service_name = value,
-                        "apx.app_path" => app_path = value,
-                        _ => {}
-                    }
+                match key {
+                    "service.name" => service_name = value,
+                    "apx.app_path" => app_path = value,
+                    _ => {}
                 }
             }
         }

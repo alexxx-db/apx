@@ -287,12 +287,11 @@ pub async fn fetch_component_impl(
     component_name: Option<&str>,
 ) -> Result<(RegistryItem, Vec<String>), String> {
     // Try cache first if we have component name
-    if let Some(component_name_val) = component_name {
-        if let Ok(Some((item, warnings))) =
+    if let Some(component_name_val) = component_name
+        && let Ok(Some((item, warnings))) =
             cache::load_cached_component(component_name_val, registry_name)
-        {
-            return Ok((item, warnings));
-        }
+    {
+        return Ok((item, warnings));
     }
 
     // Direct fetch (original implementation)
@@ -696,10 +695,10 @@ fn parse_registry_dependency(
     }
 
     // Explicit registry always wins: "@animate-ui/foo"
-    if dep.starts_with('@') {
-        if let Some((registry, name)) = dep.split_once('/') {
-            return (Some(registry.to_string()), name.to_string());
-        }
+    if dep.starts_with('@')
+        && let Some((registry, name)) = dep.split_once('/')
+    {
+        return (Some(registry.to_string()), name.to_string());
     }
 
     // Unqualified deps should resolve from the default registry.

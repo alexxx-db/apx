@@ -59,10 +59,10 @@ impl StartupLogStreamer {
         }
 
         // Update last_log_id
-        if let Ok(new_id) = storage.get_latest_id() {
-            if new_id > self.last_log_id {
-                self.last_log_id = new_id;
-            }
+        if let Ok(new_id) = storage.get_latest_id()
+            && new_id > self.last_log_id
+        {
+            self.last_log_id = new_id;
         }
 
         count
