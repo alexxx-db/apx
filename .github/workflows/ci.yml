@@ -8,8 +8,28 @@ env:
   PROTOC_VERSION: "28.3"
 
 jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      docs-only: ${{ steps.filter.outputs.docs == 'true' && steps.filter.outputs.non-docs == 'false' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Check changed paths
+        uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            docs:
+              - 'docs/**'
+            non-docs:
+              - '!docs/**'
+
   check:
     runs-on: linux-ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.docs-only == 'false'
 
     steps:
       - name: Checkout code
@@ -104,3 +124,28 @@ jobs:
 
       - name: Cargo test
         run: cargo test --workspace
+
+  docs:
+    runs-on: linux-ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.docs-only == 'true'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Install bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.8
+
+      - name: Install docs dependencies
+        working-directory: docs
+        run: bun install
+
+      - name: Build docs
+        working-directory: docs
+        run: bun run build
+
+      - name: Docs check passed
+        run: echo "✅ Documentation build successful"
