@@ -15,23 +15,27 @@ import {
   ChevronRight,
   Zap,
 } from "lucide-react";
-import { Python } from "@/components/icons/python";
-import { React as ReactIcon } from "@/components/icons/react";
-import { TypeScript } from "@/components/icons/typescript";
-import { FastAPI } from "@/components/icons/fast-api";
-import { shadcnui } from "@/components/icons/shadcn-ui";
-import { Bun } from "@/components/icons/bun";
-import { UV } from "@/components/icons/uv";
+import { Python } from "@/components/ui/svgs/python";
+import { ReactDark as ReactIcon } from "@/components/ui/svgs/reactDark";
+import { Typescript as TypeScript } from "@/components/ui/svgs/typescript";
+import { Fastapi as FastAPI } from "@/components/ui/svgs/fastapi";
+import { ShadcnUi as shadcnui } from "@/components/ui/svgs/shadcnUi";
+import { Bun } from "@/components/ui/svgs/bun";
+import { Uv as UV } from "@/components/ui/svgs/uv";
 import { TerminalDemo } from "@/components/terminal-demo";
 
 const techStack = [
-  { name: "Python", icon: Python },
-  { name: "FastAPI", icon: FastAPI },
-  { name: "React", icon: ReactIcon },
-  { name: "TypeScript", icon: TypeScript },
-  { name: "shadcn/ui", icon: shadcnui },
-  { name: "Bun", icon: Bun },
-  { name: "uv", icon: UV },
+  { name: "Python", icon: Python, href: "https://www.python.org/" },
+  { name: "FastAPI", icon: FastAPI, href: "https://fastapi.tiangolo.com/" },
+  { name: "React", icon: ReactIcon, href: "https://react.dev/" },
+  {
+    name: "TypeScript",
+    icon: TypeScript,
+    href: "https://www.typescriptlang.org/",
+  },
+  { name: "shadcn/ui", icon: shadcnui, href: "https://ui.shadcn.com/" },
+  { name: "Bun", icon: Bun, href: "https://bun.sh/" },
+  { name: "uv", icon: UV, href: "https://docs.astral.sh/uv/" },
 ];
 
 export default function HomePage() {
@@ -191,14 +195,17 @@ export default function HomePage() {
           </div>
 
           <div className="flex flex-wrap justify-center gap-3">
-            {techStack.map(({ name, icon: Icon }) => (
-              <span
+            {techStack.map(({ name, icon: Icon, href }) => (
+              <a
                 key={name}
+                href={href}
+                target="_blank"
+                rel="noopener noreferrer"
                 className="group inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/5 backdrop-blur-sm px-5 py-2.5 text-sm font-medium text-fd-foreground transition-all hover:scale-105 hover:border-white/40 hover:bg-white/10 hover:shadow-lg"
               >
                 <Icon className="w-5 h-5 transition-transform group-hover:scale-110" />
                 {name}
-              </span>
+              </a>
             ))}
           </div>
         </div>

@@ -1,5 +1,5 @@
 ---
-title: CLI Reference
+title: CLI
 description: Complete reference for apx command-line interface
 ---
 
@@ -268,15 +268,14 @@ uv run apx components add [OPTIONS] <COMPONENT> [APP_PATH]
 
 #### Arguments
 
-- `COMPONENT`: Component name (e.g., `button`, `dialog`, `table`)
+- `COMPONENT`: Component name (e.g., `button`, `dialog`, `table`, or `@registry/component`, e.g. `@animate-ui/sidebar`)
 
 #### Options
 
-| Option                  | Description                                                |
-| ----------------------- | ---------------------------------------------------------- |
-| `--registry <REGISTRY>` | Registry alias from `pyproject.toml` (e.g., `@animate-ui`) |
-| `--force`               | Overwrite existing files                                   |
-| `--dry-run`             | Print actions without writing files                        |
+| Option      | Description                         |
+| ----------- | ----------------------------------- |
+| `--force`   | Overwrite existing files            |
+| `--dry-run` | Print actions without writing files |
 
 #### Examples
 
@@ -285,7 +284,7 @@ uv run apx components add [OPTIONS] <COMPONENT> [APP_PATH]
 uv run apx components add button
 
 # Add from specific registry
-uv run apx components add accordion --registry @animate-ui
+uv run apx components add @animate-ui/accordion
 
 # Force overwrite
 uv run apx components add card --force
@@ -361,7 +360,7 @@ uv run apx bun <ARGS>
 
 ## flux
 
-Flux OTEL collector commands for observability.
+OpenTelemetry collector commands for observability.
 
 <Callout type="info">
   **Note:** You typically don't need to use flux commands directly. When you run

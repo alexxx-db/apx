@@ -1,6 +1,6 @@
 import type { SVGProps } from "react";
 
-const TypeScript = (props: SVGProps<SVGSVGElement>) => (
+const Typescript = (props: SVGProps<SVGSVGElement>) => (
   <svg {...props} viewBox="0 0 256 256" preserveAspectRatio="xMidYMid">
     <path
       d="M20 0h216c11.046 0 20 8.954 20 20v216c0 11.046-8.954 20-20 20H20c-11.046 0-20-8.954-20-20V20C0 8.954 8.954 0 20 0Z"
@@ -13,4 +13,4 @@ const TypeScript = (props: SVGProps<SVGSVGElement>) => (
   </svg>
 );
 
-export { TypeScript };
+export { Typescript };

@@ -3,6 +3,8 @@ title: Getting Started
 description: Build Databricks Apps with apx
 ---
 
+import { File, Folder, Files } from "fumadocs-ui/components/files";
+
 Welcome to the apx documentation. apx is a reliable, feature-full, human and LLM friendly development toolkit for building Databricks Apps.
 
 ## Quick Start
@@ -47,23 +49,41 @@ Note: Bun is bundled with apx and does not need to be installed separately.
 
 After initialization, your project will have this structure:
 
-```
-my-app/
-├── package.json          # Frontend dependencies
-├── pyproject.toml        # Backend dependencies
-├── src/
-│   └── my_app/
-│       ├── __dist__/     # Built frontend assets
-│       ├── backend/
-│       │   ├── app.py    # FastAPI application
-│       │   ├── models.py # Pydantic models
-│       │   └── router.py # API routes
-│       └── ui/
-│           ├── components/
-│           ├── routes/
-│           └── main.tsx
-└── databricks.yml        # Deployment configuration
-```
+<div className="font-mono">
+  <Files>
+    <Folder name="charming-aurora" defaultOpen>
+      <File name="package.json" icon="📦" />
+      <File name="pyproject.toml" icon="🐍" />
+      <File name="databricks.yml" icon="⚙️" />
+      <Folder name="src" defaultOpen>
+        <Folder name="charming_aurora" defaultOpen>
+          <Folder name="__dist__">
+            <File name="Built frontend assets" />
+          </Folder>
+          <Folder name="backend" defaultOpen>
+            <File name="app.py" />
+            <File name="models.py" />
+            <File name="router.py" />
+          </Folder>
+          <Folder name="ui" defaultOpen>
+            <Folder name="components" />
+            <Folder name="routes" />
+            <File name="main.tsx" />
+          </Folder>
+        </Folder>
+      </Folder>
+    </Folder>
+  </Files>
+</div>
+
+Quick overview of the most important files and directories:
+
+- `package.json`: Frontend dependencies and scripts. Almost no need to edit this file manually.
+- `pyproject.toml`: Python package metadata. Almost no need to edit this file manually.
+- `databricks.yml`: Databricks Bundle configuration for deployment.
+- `src/`: Source code for the app.
+- `src/<app_name>/ui/`: React + Vite frontend.
+- `src/<app_name>/backend/`: FastAPI backend.
 
 ## Development Workflow
 

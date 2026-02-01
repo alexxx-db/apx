@@ -1,0 +1,44 @@
+---
+title: Concepts
+description: Overview of the core concepts of apx
+---
+
+import { ApxEcosystemDiagram } from "@/components/apx-ecosystem-diagram";
+
+## Place of `apx` in the ecosystem
+
+This section describes the place of `apx` in the tech stack related to application development.
+
+### High level architecture and frameworks
+
+Modern Pythonic application development is dominated by two different approaches:
+
+1. **Pythonic backend and frontend** - using Python as the primary language for both backend and frontend.
+2. **Backend in Python, frontend in JavaScript** - using Python for the backend and JavaScript for the frontend.
+
+Practice shows that second approach provides wastly more flexibility and allows to use the best tools for the job.
+
+However, the problem is that combining (and supporting) a project with two mixed codebases and building tools is not a trivial task. It take cetain amount of skills and knowledge to correctly configure the repository,
+understand the border between frontend and backend, and make sure that project can be developed and deployed in a consistent way.
+
+### How `apx` fits into the ecosystem
+
+<ApxEcosystemDiagram />
+
+`apx` is a tool that helps to solve the problem of combining a project with two mixed codebases and building tools.
+
+It provides a set of commands and tools that help to:
+
+- Configure the repository
+- Connect your backend and frontend codebases
+- Build and deploy your application
+
+Specifically, `apx` does it in a following way:
+
+1. On the backend side, `apx` uses Python as the primary language and FastAPI as the web framework.
+2. `apx` automatically generates a type-safe API client for the frontend in TypeScript.
+3. On the frontend side, `apx` uses React as the primary library and Vite as the build tool.
+   To simplify the frontend development, `apx` uses `shadcn/ui` as the default set of UI components, and provides a CLI for working with [shadcn registries](https://ui.shadcn.com/docs/registry).
+
+A combination of the above practically resolves the problem of LLM hallucilations, so the only thing the developer needs to to is to describe the desired application behaviour,
+and then adjust the frontend by visual means and with the help of the MCP server.

@@ -21,6 +21,6 @@
   "registries": {
     "@animate-ui": "https://animate-ui.com/r/{name}.json",
     "@svgl": "https://svgl.app/r/{name}.json",
-    "@magicui": "https://magicui.com/r/{name}.json"
+    "@magicui": "https://magicui.design/r/{name}"
   }
 }

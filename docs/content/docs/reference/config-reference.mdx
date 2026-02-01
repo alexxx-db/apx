@@ -1,0 +1,83 @@
+---
+title: Project configuration
+description: Project configuration reference for apx projects
+---
+
+## pyproject.toml Configuration
+
+Below is an example configuration for an apx project. This shows the essential apx-specific settings and UV index configuration.
+
+```toml
+[project]
+name = "charming-aurora"
+dynamic = ["version"]
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.119.0",
+    "pydantic-settings>=2.11.0",
+    "uvicorn>=0.37.0",
+    "databricks-sdk>=0.74.0",
+]
+
+[dependency-groups]
+dev = [
+    "apx>=0.2.1",
+]
+
+[tool.apx.metadata]
+app-name = "charming-aurora"
+app-slug = "charming_aurora"
+app-entrypoint = "charming_aurora.backend.app:app"
+api-prefix = "/api"
+metadata-path = "src/charming_aurora/_metadata.py"
+
+[tool.apx.ui]
+root = "src/charming_aurora/ui"
+
+[tool.apx.ui.registries]
+"@animate-ui" = "https://animate-ui.com/r/{name}.json"
+"@ai-elements" = "https://registry.ai-sdk.dev/{name}.json"
+"@svgl" = "https://svgl.app/r/{name}.json"
+
+[tool.uv]
+
+[[tool.uv.index]]
+name = "apx-index"
+url = "https://databricks-solutions.github.io/apx/simple"
+
+[tool.uv.sources.apx]
+index = "apx-index"
+```
+
+## Configuration Sections
+
+### `[tool.apx.metadata]`
+
+- **app-name**: The display name of your application
+- **app-slug**: The Python package name (snake_case)
+- **app-entrypoint**: The FastAPI application entrypoint
+- **api-prefix**: The URL prefix for API endpoints
+- **metadata-path**: Path to the generated metadata file
+
+### `[tool.apx.ui]`
+
+- **root**: The root directory for your UI code
+
+### `[tool.apx.ui.registries]`
+
+Custom component registries that can be used with `apx add` command. Each registry URL should contain a `{name}` placeholder that will be replaced with the component name.
+
+Example:
+
+```toml
+[tool.apx.ui.registries]
+"@animate-ui" = "https://animate-ui.com/r/{name}.json"
+```
+
+This allows you to run:
+
+```bash
+apx add @animate-ui/fade-in
+```
