@@ -114,7 +114,7 @@ export default function HomePage() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {/* CLI Reference */}
             <Link
-              href="/docs/cli"
+              href="/docs/reference/cli"
               className="group relative flex flex-col rounded-2xl border border-white/10 bg-gradient-to-br from-white/5 to-white/[0.02] p-6 backdrop-blur-sm transition-all hover:scale-[1.02] hover:border-blue-500/50 hover:shadow-xl hover:shadow-blue-500/20"
             >
               <div className="absolute inset-0 bg-gradient-to-br from-blue-500/0 to-blue-500/0 group-hover:from-blue-500/10 group-hover:to-transparent rounded-2xl transition-all" />
@@ -135,7 +135,7 @@ export default function HomePage() {
 
             {/* MCP Reference */}
             <Link
-              href="/docs/mcp"
+              href="/docs/reference/mcp"
               className="group relative flex flex-col rounded-2xl border border-white/10 bg-gradient-to-br from-white/5 to-white/[0.02] p-6 backdrop-blur-sm transition-all hover:scale-[1.02] hover:border-purple-500/50 hover:shadow-xl hover:shadow-purple-500/20"
             >
               <div className="absolute inset-0 bg-gradient-to-br from-purple-500/0 to-purple-500/0 group-hover:from-purple-500/10 group-hover:to-transparent rounded-2xl transition-all" />
