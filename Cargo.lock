@@ -148,7 +148,7 @@ dependencies = [
 
 [[package]]
 name = "apx"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "apx-agent",
  "apx-common",
@@ -203,7 +203,7 @@ dependencies = [
 
 [[package]]
 name = "apx-agent"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "apx-common",
  "axum",
@@ -221,7 +221,7 @@ dependencies = [
 
 [[package]]
 name = "apx-common"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "chrono",
  "dirs 5.0.1",
