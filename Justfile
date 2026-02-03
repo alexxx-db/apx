@@ -68,7 +68,9 @@ release *tag:
     cargo check # ensure the version is set correctly in lockfile
     git commit -am "Release {{tag}}"
     git tag {{tag}}
-    git push origin main --tags
+    # Push branch and tag separately to trigger GitHub Actions on tag push
+    git push origin main
+    git push origin {{tag}}
 
 sync:
     cargo check
