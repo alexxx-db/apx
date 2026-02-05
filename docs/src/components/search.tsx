@@ -26,6 +26,8 @@ export default function DefaultSearchDialog(props: SharedProps) {
   const { locale } = useI18n(); // (optional) for i18n
   const { search, setSearch, query } = useDocsSearch({
     type: "static",
+    // Must include basePath for static exports with basePath configured
+    from: "/apx/api/search",
     initOrama,
     locale,
   });
