@@ -90,7 +90,7 @@ tempfile = "3.15"
 
 [package]
 name = "apx"
-version = "0.2.6"
+version = "0.2.7"
 edition.workspace = true
 rust-version.workspace = true
 build = "build.rs"
