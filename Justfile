@@ -1,4 +1,7 @@
 
+set unstable
+
+set script-interpreter := ['uv', 'run', '--script']
 
 fmt:
     uv tool run ruff format .
@@ -30,7 +33,6 @@ test *args: develop
     uv run --no-sync pytest tests/ -s -v -n 4 --html=.reports/report.html {{args}}
 
 # Run Rust tests
-# VIRTUAL_ENV is set in .cargo/config.toml for pyo3-build-config
 rust-test *args:
     cargo test --lib {{args}} 
 
@@ -41,10 +43,8 @@ pm message:
     git push
 
 
-gen folder profile *args: uv-sync
-    rm -rf /tmp/{{folder}}
-    RUST_LOG=DEBUG APX_DEV_PATH="{{justfile_directory()}}" uv run --no-sync apx init /tmp/{{folder}} -p {{profile}}  {{args}}
-    cd /tmp/{{folder}} && uv run apx dev check
+gen folder profile *args:
+    uv run --script scripts/dev/gen.py /tmp/{{folder}} {{profile}} {{args}}
 
 [working-directory: "docs"]
 docs *args:
