@@ -6,6 +6,8 @@ build/
 wheels/
 *.egg-info
 
+.plans
+
 # Virtual environments
 .venv
 src/apx/_version.py
