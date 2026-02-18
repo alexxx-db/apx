@@ -75,46 +75,46 @@ pub fn extract_templates() -> Result<PathBuf, String> {
     resources::templates_dir()
 }
 
-pub fn generate_openapi_spec(
+pub async fn generate_openapi_spec(
     project_root: &Path,
     app_entrypoint: &str,
     app_slug: &str,
 ) -> Result<(String, String), String> {
     // Try to fetch from running server first (200ms timeout)
-    if let Some(spec_json) = try_fetch_openapi_from_server(project_root) {
+    if let Some(spec_json) = try_fetch_openapi_from_server(project_root).await {
         debug!("Got OpenAPI spec from running server");
         return Ok((spec_json, app_slug.to_string()));
     }
 
     // Fall back to subprocess method
-    generate_openapi_spec_from_module(project_root, app_entrypoint, app_slug)
+    generate_openapi_spec_from_module(project_root, app_entrypoint, app_slug).await
 }
 
 /// Try to fetch OpenAPI spec from a running dev server.
 /// Returns None if server is not running or doesn't respond within 200ms.
-fn try_fetch_openapi_from_server(project_root: &Path) -> Option<String> {
+async fn try_fetch_openapi_from_server(project_root: &Path) -> Option<String> {
     let lock_file = lock_path(project_root);
     let lock = read_lock(&lock_file).ok()?;
 
     let url = format!("http://{}:{}/openapi.json", CLIENT_HOST, lock.port);
     debug!("Trying to fetch OpenAPI from server at {}", url);
 
-    let client = reqwest::blocking::Client::builder()
+    let client = reqwest::Client::builder()
         .timeout(Duration::from_millis(200))
         .build()
         .ok()?;
 
-    let response = client.get(&url).send().ok()?;
+    let response = client.get(&url).send().await.ok()?;
 
     if !response.status().is_success() {
         return None;
     }
 
-    response.text().ok()
+    response.text().await.ok()
 }
 
 /// Generate OpenAPI spec by running a Python subprocess via `uv run`.
-fn generate_openapi_spec_from_module(
+async fn generate_openapi_spec_from_module(
     project_root: &Path,
     app_entrypoint: &str,
     app_slug: &str,
@@ -144,11 +144,12 @@ print(json.dumps(app.openapi(), indent=2))
     );
 
     let uv_path = try_resolve_uv()?.path;
-    let output = Command::new(&uv_path)
+    let output = tokio::process::Command::new(&uv_path)
         .args(["run", "--no-sync", "python", "-c", &script])
         .arg(project_root.to_string_lossy().as_ref())
         .current_dir(project_root)
         .output()
+        .await
         .map_err(|e| format!("Failed to run uv for OpenAPI generation: {e}"))?;
 
     if !output.status.success() {
@@ -162,6 +163,70 @@ print(json.dumps(app.openapi(), indent=2))
         .to_string();
 
     Ok((spec_json, app_slug.to_string()))
+}
+
+/// Get the Databricks SDK version for a specific project directory via subprocess.
+///
+/// Uses `uv run --directory <project_dir>` to run in the project's venv context.
+pub fn get_databricks_sdk_version_for_project(
+    project_dir: &Path,
+) -> Result<Option<String>, String> {
+    debug!(
+        "get_databricks_sdk_version_for_project: checking project at {}",
+        project_dir.display()
+    );
+
+    let uv_path = match try_resolve_uv() {
+        Ok(resolved) => resolved.path,
+        Err(e) => {
+            debug!("get_databricks_sdk_version_for_project: failed to resolve uv: {e}");
+            return Ok(None);
+        }
+    };
+
+    let dir_str = project_dir.to_str().unwrap_or(".");
+    let output = Command::new(&uv_path)
+        .args([
+            "run",
+            "--directory",
+            dir_str,
+            "--no-sync",
+            "python",
+            "-c",
+            "import importlib.metadata; print(importlib.metadata.version('databricks-sdk'))",
+        ])
+        .output();
+
+    match output {
+        Ok(o) if o.status.success() => {
+            let version = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            if version.is_empty() {
+                debug!("get_databricks_sdk_version_for_project: empty output");
+                Ok(None)
+            } else {
+                debug!(
+                    "get_databricks_sdk_version_for_project: found version {}",
+                    version
+                );
+                Ok(Some(version))
+            }
+        }
+        Ok(o) => {
+            let stderr = String::from_utf8_lossy(&o.stderr);
+            debug!(
+                "get_databricks_sdk_version_for_project: subprocess failed: {}",
+                stderr
+            );
+            Ok(None)
+        }
+        Err(e) => {
+            debug!(
+                "get_databricks_sdk_version_for_project: failed to run uv: {}",
+                e
+            );
+            Ok(None)
+        }
+    }
 }
 
 /// Get the installed Databricks SDK version via subprocess
