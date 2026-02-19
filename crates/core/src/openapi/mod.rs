@@ -225,9 +225,11 @@ mod tests {
         println!("=== SPECIAL CHARS CODE ===\n{ts_code}\n=== END ===");
 
         // Verify URN enum values are properly quoted
+        // SWC may use single quotes for keys, so check with normalize_ws
+        let norm = normalize_ws(&ts_code);
         assert!(
-            ts_code.contains(r#""urn:ietf:params:scim:schemas:core:2.0:User": "urn:ietf:params:scim:schemas:core:2.0:User""#),
-            "URN enum key should be quoted"
+            norm.contains(r#""urn:ietf:params:scim:schemas:core:2.0:User": "urn:ietf:params:scim:schemas:core:2.0:User""#),
+            "URN enum key should be quoted. Generated:\n{ts_code}"
         );
         assert!(
             ts_code.contains(r#""urn:ietf:params:scim:schemas:extension:workspace:2.0:User""#),
@@ -1093,8 +1095,9 @@ mod tests {
         println!("=== BINARY STREAM CODE ===\n{ts_code}\n=== END ===");
 
         // Must return raw Response — not consume the body with json()/blob()/text()
+        // SWC formats objects multi-line, so use whitespace-normalized check
         assert!(
-            ts_code.contains("{ data: res }"),
+            normalize_ws(&ts_code).contains("{ data: res }"),
             "Should return raw Response for unknown binary content type"
         );
         assert!(
@@ -1107,7 +1110,7 @@ mod tests {
         );
         // Return type should be Response
         assert!(
-            ts_code.contains("Promise<{ data: Response }>"),
+            normalize_ws(&ts_code).contains("Promise<{ data: Response; }>"),
             "Return type should be Promise<{{ data: Response }}>"
         );
     }
@@ -1842,13 +1845,14 @@ mod tests {
             "Missing useGetItem hook"
         );
 
+        let flat = normalize_ws(&ts_code);
         // Check that params is required (no ? after params)
         assert!(
-            ts_code.contains("{ params: GetItemParams;"),
+            flat.contains("{ params: GetItemParams;"),
             "useGetItem should have required params, not optional. Generated:\n{ts_code}"
         );
         assert!(
-            !ts_code.contains("{ params?: GetItemParams;"),
+            !flat.contains("{ params?: GetItemParams;"),
             "useGetItem should NOT have optional params. Generated:\n{ts_code}"
         );
 
@@ -1860,7 +1864,7 @@ mod tests {
 
         // Same for useGetCutieCat with multiple path params
         assert!(
-            ts_code.contains("{ params: GetCutieCatParams;"),
+            flat.contains("{ params: GetCutieCatParams;"),
             "useGetCutieCat should have required params. Generated:\n{ts_code}"
         );
     }
@@ -1897,9 +1901,10 @@ mod tests {
             "Missing useListItems hook"
         );
 
+        let flat = normalize_ws(&ts_code);
         // Check that params is optional
         assert!(
-            ts_code.contains("{ params?: ListItemsParams;"),
+            flat.contains("{ params?: ListItemsParams;"),
             "useListItems should have optional params. Generated:\n{ts_code}"
         );
 
@@ -1944,9 +1949,10 @@ mod tests {
             "Missing useGetUserPosts hook"
         );
 
+        let flat = normalize_ws(&ts_code);
         // Check that params is required (not optional)
         assert!(
-            ts_code.contains("{ params: GetUserPostsParams;"),
+            flat.contains("{ params: GetUserPostsParams;"),
             "useGetUserPosts should have required params due to required path param. Generated:\n{ts_code}"
         );
 
@@ -1992,8 +1998,9 @@ mod tests {
             "Missing useGetItemSuspense hook"
         );
 
+        let flat = normalize_ws(&ts_code);
         // Count occurrences of required params pattern
-        let required_params_count = ts_code.matches("{ params: GetItemParams;").count();
+        let required_params_count = flat.matches("{ params: GetItemParams;").count();
         assert!(
             required_params_count >= 2,
             "Both useGetItem and useGetItemSuspense should have required params. Found {required_params_count} occurrences. Generated:\n{ts_code}"
@@ -2034,9 +2041,10 @@ mod tests {
             "Hook without params should not have params type. Generated:\n{ts_code}"
         );
 
+        let flat = normalize_ws(&ts_code);
         // The options should be optional and only contain query
         assert!(
-            ts_code.contains("options?: { query?:"),
+            flat.contains("options?: { query?:"),
             "Hook without params should have optional options with only query. Generated:\n{ts_code}"
         );
     }
@@ -2067,9 +2075,10 @@ mod tests {
         let ts_code = generate_and_verify(openapi_json);
         println!("=== REQUIRED QUERY PARAM ===\n{ts_code}\n=== END ===");
 
+        let flat = normalize_ws(&ts_code);
         // Even though it's a query param, it's required - so params should be required
         assert!(
-            ts_code.contains("{ params: SearchParams;"),
+            flat.contains("{ params: SearchParams;"),
             "Required query param should make params required. Generated:\n{ts_code}"
         );
         assert!(
@@ -2103,9 +2112,10 @@ mod tests {
         let ts_code = generate_and_verify(openapi_json);
         println!("=== REQUIRED HEADER PARAM ===\n{ts_code}\n=== END ===");
 
+        let flat = normalize_ws(&ts_code);
         // Required header param should make params required
         assert!(
-            ts_code.contains("{ params: GetSecureDataParams;"),
+            flat.contains("{ params: GetSecureDataParams;"),
             "Required header param should make params required. Generated:\n{ts_code}"
         );
     }
@@ -2253,6 +2263,12 @@ mod tests {
             let stdout = String::from_utf8_lossy(&output.stdout);
             Err(format!("TypeScript errors:\n{stdout}\n{stderr}"))
         }
+    }
+
+    /// Normalize whitespace in generated code for format-resilient assertions.
+    /// Collapses all whitespace sequences (including newlines) into single spaces.
+    fn normalize_ws(s: &str) -> String {
+        s.split_whitespace().collect::<Vec<_>>().join(" ")
     }
 
     /// Helper that generates TypeScript code from OpenAPI JSON and verifies it compiles with tsc.
@@ -2468,8 +2484,11 @@ export function useGetCatBuggy<TData = { data: { meow: string } }>(
         assert!(ts_code.contains("data: {"), "data should be present");
 
         // Verify mutation hook calls fetch with correct argument order
+        // SWC omits spaces around `=>` in arrow functions
         assert!(
-            ts_code.contains("(vars) => createUserPost(vars.params, vars.data)"),
+            normalize_ws(&ts_code).contains("(vars)=>createUserPost(vars.params, vars.data)")
+                || normalize_ws(&ts_code)
+                    .contains("(vars) => createUserPost(vars.params, vars.data)"),
             "Mutation hook should call fetch with (params, data) order when params is required"
         );
     }
@@ -2593,8 +2612,11 @@ export function useGetCatBuggy<TData = { data: { meow: string } }>(
         assert!(ts_code.contains("data: {"), "data should be present");
 
         // Verify mutation hook has correct argument order
+        // SWC omits spaces around `=>` in arrow functions
         assert!(
-            ts_code.contains("(vars) => updateResource(vars.params, vars.data)"),
+            normalize_ws(&ts_code).contains("(vars)=>updateResource(vars.params, vars.data)")
+                || normalize_ws(&ts_code)
+                    .contains("(vars) => updateResource(vars.params, vars.data)"),
             "Mutation hook should use (params, data) order when params has required fields"
         );
     }
@@ -2629,18 +2651,18 @@ export function useGetCatBuggy<TData = { data: { meow: string } }>(
         println!("=== BODY FIRST (ALL PARAMS OPTIONAL) ===\n{ts_code}\n=== END ===");
 
         // data (required) must come before params (optional)
-        let signature = ts_code
-            .lines()
-            .find(|l| l.contains("export const uploadFile"))
-            .expect("uploadFile not found");
+        // SWC may break function signatures across multiple lines
+        let norm = normalize_ws(&ts_code);
         assert!(
-            signature.contains("data:") && signature.contains("params?:"),
+            norm.contains("data:") && norm.contains("params?:"),
             "Should have required data and optional params"
         );
 
         // Mutation hook should call with (data, params) order
+        // SWC omits spaces around `=>` in arrow functions
         assert!(
-            ts_code.contains("(vars) => uploadFile(vars.data, vars.params)"),
+            norm.contains("(vars)=>uploadFile(vars.data, vars.params)")
+                || norm.contains("(vars) => uploadFile(vars.data, vars.params)"),
             "Mutation hook should use (data, params) order when params is optional. Generated:\n{ts_code}"
         );
     }
@@ -3671,10 +3693,11 @@ export function useGetCatBuggy<TData = { data: { meow: string } }>(
             "Should have FormData data"
         );
 
+        let flat = normalize_ws(&ts_code);
         // Mutation hook vars should include both
         assert!(
-            ts_code.contains("{ params: UploadAvatarParams; data: FormData }"),
-            "Mutation vars should have params and FormData"
+            flat.contains("{ params: UploadAvatarParams; data: FormData; }"),
+            "Mutation vars should have params and FormData. Generated:\n{ts_code}"
         );
     }
 
@@ -4046,9 +4069,10 @@ export function useGetCatBuggy<TData = { data: { meow: string } }>(
             "Fetch function params should be required (non-optional)"
         );
 
+        let flat = normalize_ws(&ts_code);
         // Hook: options object must be required (contains required params)
         assert!(
-            ts_code.contains("(options: { params: GetScanParams"),
+            flat.contains("(options: { params: GetScanParams"),
             "Hook options should be required with required params field"
         );
 
