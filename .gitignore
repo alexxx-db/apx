@@ -49,6 +49,7 @@ target/
 
 .cursor/plans
 .claude/plans/
+.prompts/
 
 /assets/models
 .reports
