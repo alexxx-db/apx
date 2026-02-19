@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Cargo fmt — must match CI exactly:
+#   cargo fmt --all -- --check
+echo "Running cargo fmt --all -- --check..."
+if ! cargo fmt --all -- --check; then
+    echo ""
+    echo "Formatting check failed. Run 'cargo fmt --all' to fix."
+    exit 1
+fi
+
+# Cargo clippy — must match CI exactly:
+#   cargo clippy --workspace --exclude apx-studio --all-targets -- -D warnings
+echo "Running cargo clippy --workspace --exclude apx-studio --all-targets -- -D warnings..."
+if ! cargo clippy --workspace --exclude apx-studio --all-targets -- -D warnings; then
+    echo ""
+    echo "Clippy check failed. Fix the warnings above."
+    exit 1
+fi

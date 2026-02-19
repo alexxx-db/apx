@@ -19,7 +19,7 @@ The MCP server provides tools for:
 ## Starting the MCP Server
 
 ```bash
-uv run apx mcp
+apx mcp
 ```
 
 The MCP server runs over stdio and integrates with AI assistants that support the Model Context Protocol.
@@ -40,17 +40,17 @@ Choose your AI assistant to see the configuration:
           "args": ["x", "--bun", "shadcn@latest", "mcp"]
         },
         "apx": {
-          "command": "uv",
-          "args": ["run", "apx", "mcp"]
+          "command": "apx",
+          "args": ["mcp"]
         }
       }
     }
     ```
 
-    Or apply the Cursor template:
+    Or apply the Cursor addon:
 
     ```bash
-    uv run apx dev apply cursor
+    apx dev apply cursor
     ```
 
   </Tab>
@@ -65,21 +65,21 @@ Choose your AI assistant to see the configuration:
           "args": ["x", "--bun", "shadcn@latest", "mcp"]
         },
         "apx": {
-          "command": "uv",
-          "args": ["run", "apx", "mcp"]
+          "command": "apx",
+          "args": ["mcp"]
         },
         "playwright": {
-          "command": "bun",
-          "args": ["x", "--bun", "@playwright/mcp@latest"]
+          "command": "apx",
+          "args": ["bun", "x", "--bun", "@playwright/mcp@latest"]
         }
       }
     }
     ```
 
-    Or apply the VSCode template:
+    Or apply the VSCode addon:
 
     ```bash
-    uv run apx dev apply vscode
+    apx dev apply vscode
     ```
 
   </Tab>
@@ -94,31 +94,31 @@ Choose your AI assistant to see the configuration:
           "args": ["x", "--bun", "shadcn@latest", "mcp"]
         },
         "apx": {
-          "command": "uv",
-          "args": ["run", "apx", "mcp"]
+          "command": "apx",
+          "args": ["mcp"]
         },
         "playwright": {
-          "command": "bun",
-          "args": ["x", "--bun", "@playwright/mcp@latest"]
+          "command": "apx",
+          "args": ["bun", "x", "--bun", "@playwright/mcp@latest"]
         }
       }
     }
     ```
 
-    Or apply the Claude template:
+    Or apply the Claude addon:
 
     ```bash
-    uv run apx dev apply claude
+    apx dev apply claude
     ```
 
     This also creates a `CLAUDE.md` file with project instructions.
 
   </Tab>
   <Tab value="Codex">
-    Apply the Codex template to create `AGENTS.md`:
+    Apply the Codex addon to create `AGENTS.md`:
 
     ```bash
-    uv run apx dev apply codex
+    apx dev apply codex
     ```
 
     This creates an `AGENTS.md` file with project instructions for OpenAI Codex.
@@ -143,10 +143,17 @@ Choose your AI assistant to see the configuration:
 
 ### Component Tools
 
-| Tool                         | Description                                             |
-| ---------------------------- | ------------------------------------------------------- |
-| `search_registry_components` | Search shadcn registry components using semantic search |
-| `add_component`              | Add a component to the project                          |
+| Tool                         | Description                                                      |
+| ---------------------------- | ---------------------------------------------------------------- |
+| `search_registry_components` | Search shadcn registry components using semantic search           |
+| `list_registry_components`   | List all available components in a registry                       |
+| `add_component`              | Add a component to the project                                    |
+
+### Project Tools
+
+| Tool     | Description                              |
+| -------- | ---------------------------------------- |
+| `routes` | List all API routes from the OpenAPI schema |
 
 ### Documentation Tools
 
@@ -216,6 +223,17 @@ Search for UI components using semantic search across configured registries.
 
 **Returns:** List of matching components with registry and relevance score
 
+### list_registry_components
+
+List all available components in a registry.
+
+**Parameters:**
+
+- `app_path`: Absolute path to the project directory
+- `registry` (optional): Registry name (e.g., `@animate-ui`). Omit for default shadcn registry.
+
+**Returns:** List of component names in the registry
+
 ### add_component
 
 Add a UI component to your project.
@@ -228,6 +246,16 @@ Add a UI component to your project.
 - `force` (optional): Overwrite existing files (default: `false`)
 
 **Returns:** Confirmation message
+
+### routes
+
+List all API routes from the OpenAPI schema.
+
+**Parameters:**
+
+- `app_path`: Absolute path to the project directory
+
+**Returns:** List of API routes with methods, paths, and operation IDs
 
 ### docs
 
@@ -273,10 +301,9 @@ Fetch logs from a deployed Databricks App.
 
 The MCP server also exposes resources that provide project information:
 
-| Resource       | Description                                         |
-| -------------- | --------------------------------------------------- |
-| `apx://info`   | Information about the apx toolkit and project stack |
-| `apx://routes` | List of API routes from OpenAPI schema              |
+| Resource     | Description                                         |
+| ------------ | --------------------------------------------------- |
+| `apx://info` | Information about the apx toolkit and project stack |
 
 ---
 
