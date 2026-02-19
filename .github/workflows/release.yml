@@ -15,8 +15,6 @@ jobs:
   # ============================================
   build:
     runs-on: ${{ matrix.os }}
-    env:
-      PROTOC_VERSION: "28.3"
     strategy:
       fail-fast: false
       matrix:
@@ -80,33 +78,6 @@ jobs:
           python-version-file: ".python-version"
 
       # ============================================
-      # Preparation: Install Protoc (All Platforms)
-      # ============================================
-      # Protoc is required for building lance-encoding dependency
-      # Uses scripts/download_protoc.py for unified, platform-agnostic installation
-      # Cache key includes OS, arch, and version for proper invalidation
-      - name: Cache Protoc
-        id: cache-protoc
-        uses: actions/cache@v5
-        with:
-          path: ${{ github.workspace }}/.protoc
-          key: protoc-${{ runner.os }}-${{ runner.arch }}-${{ env.PROTOC_VERSION }}
-
-      - name: Download Protoc (script-based, unified)
-        if: steps.cache-protoc.outputs.cache-hit != 'true'
-        run: uv run --script scripts/download_protoc.py --version ${{ env.PROTOC_VERSION }} --output-dir ${{ github.workspace }}/.protoc
-
-      - name: Setup Protoc environment
-        shell: bash
-        run: |
-          # Add protoc to PATH for native builds (macOS/Windows)
-          echo "${{ github.workspace }}/.protoc/bin" >> $GITHUB_PATH
-          # Set PROTOC env var for prost-build
-          echo "PROTOC=${{ github.workspace }}/.protoc/bin/protoc" >> $GITHUB_ENV
-          # Verify installation
-          ${{ github.workspace }}/.protoc/bin/protoc --version || true
-
-      # ============================================
       # Build apx-agent binary
       # ============================================
       - name: Cache apx-agent binary
@@ -148,9 +119,7 @@ jobs:
           rust-toolchain: "1.92.0"
           sccache: true
           docker-options: >-
-            -v ${{ github.workspace }}/.protoc:/protoc
             -v ${{ github.workspace }}/.bins/agent:/project/.bins/agent
-            -e PROTOC=/protoc/bin/protoc
 
       - name: Build wheels (macOS/Windows)
         if: runner.os != 'Linux'
@@ -160,7 +129,6 @@ jobs:
           args: --release --out dist --compression-level 9 --manifest-path crates/apx/Cargo.toml
           rust-toolchain: "1.92.0"
           sccache: true
-          # Protoc already in PATH from setup step, PROTOC env var set
 
       # ============================================
       # Upload Artifacts
@@ -176,8 +144,6 @@ jobs:
   # ============================================
   build-standalone:
     runs-on: ${{ matrix.os }}
-    env:
-      PROTOC_VERSION: "28.3"
     strategy:
       fail-fast: false
       matrix:
@@ -246,24 +212,6 @@ jobs:
         with:
           python-version-file: ".python-version"
 
-      # Protoc — cache key shared with build job, so often a cache hit
-      - name: Cache Protoc
-        id: cache-protoc
-        uses: actions/cache@v5
-        with:
-          path: ${{ github.workspace }}/.protoc
-          key: protoc-${{ runner.os }}-${{ runner.arch }}-${{ env.PROTOC_VERSION }}
-
-      - name: Download Protoc
-        if: steps.cache-protoc.outputs.cache-hit != 'true'
-        run: uv run --script scripts/download_protoc.py --version ${{ env.PROTOC_VERSION }} --output-dir ${{ github.workspace }}/.protoc
-
-      - name: Setup Protoc environment
-        shell: bash
-        run: |
-          echo "${{ github.workspace }}/.protoc/bin" >> $GITHUB_PATH
-          echo "PROTOC=${{ github.workspace }}/.protoc/bin/protoc" >> $GITHUB_ENV
-
       # Cross-compilation tool (used for both agent and apx builds)
       - name: Install cross
         if: matrix.cross
@@ -292,10 +240,6 @@ jobs:
 
       - name: Build apx binary (cross)
         if: matrix.cross
-        env:
-          CROSS_CONTAINER_OPTS: >-
-            -v ${{ github.workspace }}/.protoc:/protoc
-            -e PROTOC=/protoc/bin/protoc
         run: cross build --release -p apx-bin --target ${{ matrix.rust_target }}
 
       # Rename and upload

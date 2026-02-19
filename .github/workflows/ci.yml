@@ -5,7 +5,6 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  PROTOC_VERSION: "28.3"
 
 jobs:
   detect-changes:
@@ -65,23 +64,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-target-${{ hashFiles('**/Cargo.lock') }}-
             ${{ runner.os }}-cargo-target-
-
-      # Install protoc (required for prost-build)
-      - name: Cache Protoc
-        id: cache-protoc
-        uses: actions/cache@v5
-        with:
-          path: .protoc
-          key: protoc-${{ runner.os }}-${{ runner.arch }}-${{ env.PROTOC_VERSION }}
-
-      - name: Download Protoc
-        if: steps.cache-protoc.outputs.cache-hit != 'true'
-        run: uv run --script scripts/download_protoc.py --version ${{ env.PROTOC_VERSION }} --output-dir .protoc
-
-      - name: Setup Protoc environment
-        run: |
-          echo "${{ github.workspace }}/.protoc/bin" >> $GITHUB_PATH
-          echo "PROTOC=${{ github.workspace }}/.protoc/bin/protoc" >> $GITHUB_ENV
 
       # some tests are using `bun x tsc` to typecheck the code
       - name: Install bun
