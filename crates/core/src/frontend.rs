@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::common::read_project_metadata;
-use crate::interop::frontend_entrypoint_path;
+use crate::interop::ensure_frontend_entrypoint;
 
 /// Prepare arguments for running the frontend entrypoint
 /// Returns (entrypoint_path, args, app_name) where args are [mode, ui_root, out_dir, public_dir]
@@ -13,14 +13,18 @@ pub fn prepare_frontend_args(
     let metadata = read_project_metadata(app_dir)?;
 
     // 2. Resolve all paths to absolute
-    let ui_root_abs = app_dir.join(&metadata.ui_root);
+    let ui_root = metadata
+        .ui_root
+        .as_ref()
+        .ok_or("Project has no UI configured (missing [tool.apx.ui] in pyproject.toml)")?;
+    let ui_root_abs = app_dir.join(ui_root);
     let out_dir_abs = metadata.dist_dir(app_dir);
     let public_dir_abs = ui_root_abs.join("public");
 
     // Note: __dist__ directory is created by write_metadata_file()
 
-    // 3. Get entrypoint.ts path from Python package (same as bun binary)
-    let entrypoint = frontend_entrypoint_path()?;
+    // 3. Write entrypoint.ts into project's node_modules/.apx/
+    let entrypoint = ensure_frontend_entrypoint(app_dir)?;
 
     // 4. Prepare arguments
     let args = vec![

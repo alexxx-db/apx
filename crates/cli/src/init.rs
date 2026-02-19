@@ -1,25 +1,89 @@
 use clap::Args;
-use dialoguer::{Confirm, Input, Select};
+use console::style;
+use dialoguer::theme::{ColorfulTheme, Theme};
+use dialoguer::{Confirm, Input, MultiSelect};
 use rand::seq::SliceRandom;
-use std::ffi::OsStr;
+use std::collections::BTreeMap;
+use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 use tera::Context;
 use tokio::process::Command;
 use tracing::debug;
-use walkdir::WalkDir;
 
-use crate::common::{
-    Assistant, Layout, Template, has_apx_config, modify_pyproject, resolve_app_dir,
-};
+/// (name, display_name, description, is_default, order)
+type AddonEntry = (String, String, String, bool, i32);
+
+/// Marker prefix for group header items in the multi-select list.
+const HEADER_MARKER: &str = "\x01";
+
+/// Custom theme that renders group headers as bold labels without checkboxes.
+struct GroupedTheme {
+    inner: ColorfulTheme,
+}
+
+impl GroupedTheme {
+    fn new() -> Self {
+        Self {
+            inner: ColorfulTheme::default(),
+        }
+    }
+}
+
+impl Theme for GroupedTheme {
+    fn format_multi_select_prompt(&self, f: &mut dyn fmt::Write, prompt: &str) -> fmt::Result {
+        self.inner.format_multi_select_prompt(f, prompt)
+    }
+
+    fn format_multi_select_prompt_item(
+        &self,
+        f: &mut dyn fmt::Write,
+        text: &str,
+        checked: bool,
+        active: bool,
+    ) -> fmt::Result {
+        if let Some(label) = text.strip_prefix(HEADER_MARKER) {
+            write!(f, "  {}:", style(label).for_stderr().bold())
+        } else {
+            self.inner
+                .format_multi_select_prompt_item(f, text, checked, active)
+        }
+    }
+
+    fn format_multi_select_prompt_selection(
+        &self,
+        f: &mut dyn fmt::Write,
+        prompt: &str,
+        selections: &[&str],
+    ) -> fmt::Result {
+        let filtered: Vec<&str> = selections
+            .iter()
+            .filter(|s| !s.starts_with(HEADER_MARKER))
+            .copied()
+            .collect();
+        self.inner
+            .format_multi_select_prompt_selection(f, prompt, &filtered)
+    }
+}
+
+fn capitalize_first(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        None => String::new(),
+        Some(c) => c.to_uppercase().to_string() + chars.as_str(),
+    }
+}
+
+use crate::common::{has_apx_config, modify_pyproject, resolve_app_dir};
 use crate::components::add::{ComponentInput, add_components};
+use crate::dev::apply::{apply_python_edits, discover_all_addons, read_addon_manifest};
 use crate::run_cli_async_helper;
 use apx_core::common::list_profiles;
 use apx_core::common::{
     BunCommand, format_elapsed_ms, run_with_spinner, run_with_spinner_async, spinner,
 };
 use apx_core::dotenv::DotenvFile;
-use apx_core::interop::extract_templates;
+use apx_core::interop::{get_template_content, list_template_files};
 use std::time::Instant;
 
 const APX_INDEX_URL: &str = "https://databricks-solutions.github.io/apx/simple";
@@ -37,33 +101,23 @@ pub struct InitArgs {
         help = "The name of the project. Will prompt if not provided"
     )]
     pub app_name: Option<String>,
+    /// Addons to enable (comma-separated, e.g. --addons=ui,sidebar).
+    /// Use --addons=none or --no-addons for a backend-only project.
     #[arg(
         long,
-        short = 't',
-        value_enum,
-        help = "The template to use. Will prompt if not provided"
+        value_delimiter = ',',
+        help = "Addons to enable (comma-separated). Use 'none' or --no-addons for backend-only"
     )]
-    pub template: Option<Template>,
+    pub addons: Option<Vec<String>>,
+    /// Shorthand for --addons=none (backend-only, no addons)
+    #[arg(long = "no-addons", conflicts_with = "addons")]
+    pub no_addons: bool,
     #[arg(
         long,
         short = 'p',
         help = "The Databricks profile to use. Will prompt if not provided"
     )]
     pub profile: Option<String>,
-    #[arg(
-        long,
-        short = 'a',
-        value_enum,
-        help = "The type of assistant to use (cursor/vscode/codex/claude). Will prompt if not provided"
-    )]
-    pub assistant: Option<Assistant>,
-    #[arg(
-        long,
-        short = 'l',
-        value_enum,
-        help = "The layout to use. Will prompt if not provided"
-    )]
-    pub layout: Option<Layout>,
     #[arg(
         long = "as-member",
         value_name = "MEMBER_PATH",
@@ -79,9 +133,8 @@ pub async fn run(args: InitArgs) -> i32 {
 }
 
 async fn run_inner(mut args: InitArgs) -> Result<(), String> {
-    // Eagerly resolve both tools to surface errors early
+    // Eagerly resolve uv (always needed)
     let _uv = apx_core::download::resolve_uv().await?;
-    let _bun = BunCommand::new().await?;
 
     let workspace_root = resolve_app_dir(args.app_path.take());
 
@@ -110,8 +163,6 @@ async fn run_inner(mut args: InitArgs) -> Result<(), String> {
         workspace_root.clone()
     };
 
-    let templates_dir = extract_templates()?;
-
     println!("Welcome to apx 🚀\n");
 
     if args.app_name.is_none() {
@@ -128,17 +179,139 @@ async fn run_inner(mut args: InitArgs) -> Result<(), String> {
     let app_name = normalize_app_name(&app_name_raw)?;
     let app_slug = app_name.replace("-", "_");
 
-    if args.template.is_none() {
-        let choices = [Template::Minimal, Template::Essential, Template::Stateful];
-        let default_idx = 1; // Default to essential
-        let selection = Select::new()
-            .with_prompt("Which template would you like to use?")
-            .items(&["minimal", "essential", "stateful"])
-            .default(default_idx)
+    // ─── Discover all available addons ─────────────────────
+    let all_addons = discover_all_addons();
+    let addon_names: Vec<String> = all_addons.iter().map(|(name, _)| name.clone()).collect();
+
+    // ─── Resolve addons ─────────────────────────────────────
+    let selected_addons: Vec<String> = if args.no_addons {
+        // --no-addons → backend-only
+        Vec::new()
+    } else if let Some(ref addons) = args.addons {
+        // --addons=none → backend-only; --addons=ui,sidebar → explicit list
+        if addons.len() == 1 && addons[0] == "none" {
+            Vec::new()
+        } else {
+            // Validate addon names
+            for a in addons {
+                if !addon_names.contains(a) {
+                    return Err(format!(
+                        "Unknown addon '{}'. Available addons: {}",
+                        a,
+                        addon_names.join(", ")
+                    ));
+                }
+            }
+            addons.clone()
+        }
+    } else {
+        // Interactive grouped multi-select
+        // Group addons by their group field, ordered: ui, backend, assistants, then rest
+        let group_order = ["ui", "backend", "assistants"];
+        let mut groups: BTreeMap<String, Vec<AddonEntry>> = BTreeMap::new();
+        let mut group_display_names: BTreeMap<String, String> = BTreeMap::new();
+        for (name, manifest) in &all_addons {
+            let group = if manifest.addon.group.is_empty() {
+                "common".to_string()
+            } else {
+                manifest.addon.group.clone()
+            };
+            if !manifest.addon.group_display_name.is_empty() {
+                group_display_names
+                    .entry(group.clone())
+                    .or_insert_with(|| manifest.addon.group_display_name.clone());
+            }
+            groups.entry(group).or_default().push((
+                name.clone(),
+                manifest.addon.display_name.clone(),
+                manifest.addon.description.clone(),
+                manifest.addon.default,
+                manifest.addon.order,
+            ));
+        }
+        // Sort addons within each group by order
+        for group_addons in groups.values_mut() {
+            group_addons.sort_by_key(|(_, _, _, _, order)| *order);
+        }
+
+        let mut ordered_groups: Vec<String> = Vec::new();
+        for g in &group_order {
+            if groups.contains_key(*g) {
+                ordered_groups.push(g.to_string());
+            }
+        }
+        for g in groups.keys() {
+            if !ordered_groups.contains(g) {
+                ordered_groups.push(g.clone());
+            }
+        }
+
+        // Build flat list with header items interleaved
+        let mut labels: Vec<String> = Vec::new();
+        let mut defaults: Vec<bool> = Vec::new();
+        let mut is_header: Vec<bool> = Vec::new();
+        let mut addon_for_index: Vec<Option<String>> = Vec::new();
+
+        for group_name in &ordered_groups {
+            if let Some(group_addons) = groups.get(group_name) {
+                // Group header (non-selectable visually)
+                let header_label = group_display_names
+                    .get(group_name)
+                    .cloned()
+                    .unwrap_or_else(|| capitalize_first(group_name));
+                labels.push(format!("{}{}", HEADER_MARKER, header_label));
+                defaults.push(false);
+                is_header.push(true);
+                addon_for_index.push(None);
+
+                for (name, display_name, desc, default, _order) in group_addons {
+                    let label_name = if display_name.is_empty() {
+                        name.as_str()
+                    } else {
+                        display_name.as_str()
+                    };
+                    let label = if desc.is_empty() {
+                        label_name.to_string()
+                    } else {
+                        format!("{label_name} — {desc}")
+                    };
+                    labels.push(label);
+                    defaults.push(*default);
+                    is_header.push(false);
+                    addon_for_index.push(Some(name.clone()));
+                }
+            }
+        }
+
+        let label_refs: Vec<&str> = labels.iter().map(|l| l.as_str()).collect();
+        let theme = GroupedTheme::new();
+        let selections = MultiSelect::with_theme(&theme)
+            .with_prompt(
+                "Which addons would you like to enable? (space = toggle, enter = confirm, a = all)",
+            )
+            .items(&label_refs)
+            .defaults(&defaults)
+            .report(false)
             .interact()
-            .map_err(|err| format!("Failed to select template: {err}"))?;
-        args.template = Some(choices[selection]);
-    }
+            .map_err(|err| format!("Failed to select addons: {err}"))?;
+
+        // Filter out header indices and map to addon names
+        let selected: Vec<String> = selections
+            .into_iter()
+            .filter(|&i| !is_header[i])
+            .filter_map(|i| addon_for_index[i].clone())
+            .collect();
+
+        if selected.is_empty() {
+            println!("  Addons: none");
+        } else {
+            println!("  Addons: {}", selected.join(", "));
+        }
+
+        selected
+    };
+
+    let ui_enabled = selected_addons.iter().any(|a| a == "ui");
 
     if args.profile.is_none() {
         let available_profiles = list_profiles()?;
@@ -178,49 +351,10 @@ async fn run_inner(mut args: InitArgs) -> Result<(), String> {
         }
     }
 
-    if args.assistant.is_none() {
-        let should_setup = Confirm::new()
-            .with_prompt("Would you like to set up AI assistant rules?")
-            .default(true)
-            .interact()
-            .map_err(|err| format!("Failed to read assistant choice: {err}"))?;
-        if should_setup {
-            let choices = [
-                Assistant::Cursor,
-                Assistant::Vscode,
-                Assistant::Codex,
-                Assistant::Claude,
-            ];
-            let selection = Select::new()
-                .with_prompt("Which assistant would you like to use?")
-                .items(&["cursor", "vscode", "codex", "claude"])
-                .default(0)
-                .interact()
-                .map_err(|err| format!("Failed to select assistant: {err}"))?;
-            args.assistant = Some(choices[selection]);
-        }
+    // Resolve bun only for UI-enabled projects
+    if ui_enabled {
+        let _bun = BunCommand::new().await?;
     }
-
-    let template = args.template.take().unwrap_or(Template::Essential);
-
-    // Skip layout selection for minimal template (always uses basic layout)
-    if !matches!(template, Template::Minimal) && args.layout.is_none() {
-        let choices = [Layout::Sidebar, Layout::Basic];
-        let selection = Select::new()
-            .with_prompt("Which layout would you like to use?")
-            .items(&["sidebar", "basic"])
-            .default(0)
-            .interact()
-            .map_err(|err| format!("Failed to select layout: {err}"))?;
-        args.layout = Some(choices[selection]);
-    }
-
-    // Minimal template always uses basic layout
-    let layout = if matches!(template, Template::Minimal) {
-        Layout::Basic
-    } else {
-        args.layout.take().unwrap_or(Layout::Sidebar)
-    };
 
     println!(
         "\nInitializing app {} in {}\n",
@@ -236,8 +370,7 @@ async fn run_inner(mut args: InitArgs) -> Result<(), String> {
         "✅ Project layout prepared",
         || {
             ensure_dir(&app_path)?;
-            let base_template_dir = templates_dir.join("base");
-            process_template_directory(&base_template_dir, &app_path, &app_name, &app_slug)?;
+            render_embedded_templates("base/", &app_path, &app_name, &app_slug)?;
 
             let dist_dir = app_path.join("src").join(&app_slug).join("__dist__");
             ensure_dir(&dist_dir)?;
@@ -249,37 +382,27 @@ async fn run_inner(mut args: InitArgs) -> Result<(), String> {
             fs::write(build_dir.join(".gitignore"), "*\n")
                 .map_err(|err| format!("Failed to write .build .gitignore: {err}"))?;
 
-            if matches!(template, Template::Stateful) {
-                let stateful_addon = templates_dir.join("addons").join("stateful");
-                process_template_directory(&stateful_addon, &app_path, &app_name, &app_slug)?;
-            }
-
-            // Apply minimal UI overlay and cleanup unused files
-            if matches!(template, Template::Minimal) {
-                let minimal_ui_addon = templates_dir.join("addons").join("minimal-ui");
-                process_template_directory(&minimal_ui_addon, &app_path, &app_name, &app_slug)?;
-
-                // Delete unused files for minimal template
-                let ui_path = app_path.join("src").join(&app_slug).join("ui");
-                // Remove components/ui/ (shadcn)
-                let _ = fs::remove_dir_all(ui_path.join("components/ui"));
-                // Remove components/backgrounds/
-                let _ = fs::remove_dir_all(ui_path.join("components/backgrounds"));
-                // Remove unused apx components
-                let _ = fs::remove_file(ui_path.join("components/apx/mode-toggle.tsx"));
-                let _ = fs::remove_file(ui_path.join("components/apx/navbar.tsx"));
-                let _ = fs::remove_file(ui_path.join("components/apx/theme-provider.tsx"));
-            }
-
             if let Some(profile) = args.profile.as_deref() {
                 let mut dotenv = DotenvFile::read(&app_path.join(".env"))?;
                 dotenv.update("DATABRICKS_CONFIG_PROFILE", profile)?;
             }
 
-            if matches!(layout, Layout::Sidebar) {
-                let sidebar_addon = templates_dir.join("addons").join("sidebar");
-                process_template_directory(&sidebar_addon, &app_path, &app_name, &app_slug)?;
+            // Apply all selected addon files
+            for addon_name in &selected_addons {
+                let prefix = format!("addons/{}/", addon_name);
+                render_embedded_templates(&prefix, &app_path, &app_name, &app_slug)?;
+
+                // Apply Python AST edits (imports + Dependencies aliases) from manifest
+                if let Some(manifest) = read_addon_manifest(addon_name) {
+                    apply_python_edits(&manifest, &app_path, &app_slug)?;
+                }
+
+                // Handle UI addon's pyproject merge
+                if addon_name == "ui" {
+                    merge_ui_pyproject_config(&app_path, &app_slug)?;
+                }
             }
+
             Ok(())
         },
     )?;
@@ -332,78 +455,33 @@ async fn run_inner(mut args: InitArgs) -> Result<(), String> {
     ensure_apx_uv_config(&pyproject_path, apx_version)?;
     debug!("Configured apx {} from index", apx_version);
 
-    if let Some(assistant) = args.assistant.take() {
-        let rules_dir = templates_dir.join("addons");
-        run_with_spinner(
-            "🤖 Setting up assistant rules...",
-            "✅ Assistant rules configured",
-            || {
-                match assistant {
-                    Assistant::Vscode => process_template_directory(
-                        &rules_dir.join("vscode"),
-                        &app_path,
-                        &app_name,
-                        &app_slug,
-                    )?,
-                    Assistant::Cursor => process_template_directory(
-                        &rules_dir.join("cursor"),
-                        &app_path,
-                        &app_name,
-                        &app_slug,
-                    )?,
-                    Assistant::Claude => process_template_directory(
-                        &rules_dir.join("claude"),
-                        &app_path,
-                        &app_name,
-                        &app_slug,
-                    )?,
-                    Assistant::Codex => {
-                        process_template_directory(
-                            &rules_dir.join("codex"),
-                            &app_path,
-                            &app_name,
-                            &app_slug,
-                        )?;
-                        println!("Please note that Codex mcp config is not supported yet.");
-                        println!(
-                            "Follow this guide to set it up manually: https://ui.shadcn.com/docs/mcp#codex"
-                        );
-                    }
+    // Manifest-driven component installation
+    if !selected_addons.is_empty() {
+        let mut all_components: Vec<ComponentInput> = Vec::new();
+        for addon_name in &selected_addons {
+            if let Some(manifest) = read_addon_manifest(addon_name) {
+                for comp in &manifest.components.install {
+                    all_components.push(ComponentInput::new(comp));
                 }
-                Ok(())
-            },
-        )?;
-    }
-
-    // Add shadcn components for non-minimal templates
-    if !matches!(template, Template::Minimal) {
-        let mut components_to_add = vec![ComponentInput::new("button")];
-
-        if matches!(layout, Layout::Sidebar) {
-            components_to_add.extend([
-                ComponentInput::new("avatar"),
-                ComponentInput::new("sidebar"),
-                ComponentInput::new("separator"),
-                ComponentInput::new("skeleton"),
-                ComponentInput::new("badge"),
-                ComponentInput::new("card"),
-            ]);
+            }
         }
 
-        let components_start = Instant::now();
-        let sp = spinner("🎨 Adding components...");
+        if !all_components.is_empty() {
+            let components_start = Instant::now();
+            let sp = spinner("🎨 Adding components...");
 
-        let result = add_components(&app_path, &components_to_add, true).await?;
+            let result = add_components(&app_path, &all_components, true).await?;
 
-        sp.finish_and_clear();
-        println!(
-            "✅ Components added ({})",
-            format_elapsed_ms(components_start)
-        );
+            sp.finish_and_clear();
+            println!(
+                "✅ Components added ({})",
+                format_elapsed_ms(components_start)
+            );
 
-        if !result.warnings.is_empty() {
-            for warning in &result.warnings {
-                eprintln!("   ⚠️  {warning}");
+            if !result.warnings.is_empty() {
+                for warning in &result.warnings {
+                    eprintln!("   ⚠️  {warning}");
+                }
             }
         }
     }
@@ -470,29 +548,40 @@ fn ensure_dir(path: &Path) -> Result<(), String> {
     fs::create_dir_all(path).map_err(|err| format!("Failed to create directory: {err}"))
 }
 
-fn process_template_directory(
-    source_dir: &Path,
+/// Render embedded templates matching `prefix` into `target_dir`.
+///
+/// The prefix is stripped from the embedded path to form the relative output path.
+/// Paths containing `/base/` or starting with `base/` have `base` replaced with `app_slug`.
+/// Files ending in `.jinja2` are rendered through Tera; others are copied verbatim.
+/// `addon.toml` files are skipped (internal metadata, not user-facing).
+pub(crate) fn render_embedded_templates(
+    prefix: &str,
     target_dir: &Path,
     app_name: &str,
     app_slug: &str,
 ) -> Result<(), String> {
-    for entry in WalkDir::new(source_dir) {
-        let entry = entry.map_err(|err| format!("Failed to read template directory: {err}"))?;
-        if !entry.file_type().is_file() {
+    let files = list_template_files(prefix);
+    if files.is_empty() {
+        return Err(format!("No template files found for prefix: {prefix}"));
+    }
+
+    for file_path in &files {
+        // Strip the prefix to get the relative path for the output
+        let rel = file_path.strip_prefix(prefix).unwrap_or(file_path.as_str());
+
+        // Skip addon manifest — internal metadata, not user-facing
+        if rel == "addon.toml" || rel.ends_with("/addon.toml") {
             continue;
         }
-        let rel_path = entry
-            .path()
-            .strip_prefix(source_dir)
-            .map_err(|err| format!("Failed to build relative path: {err}"))?;
-        let mut path_str = rel_path.to_string_lossy().replace('\\', "/");
+
+        let mut path_str = rel.to_string();
         if path_str.contains("/base/") || path_str.starts_with("base/") {
             path_str = path_str
                 .replace("/base/", &format!("/{app_slug}/"))
                 .replace("base/", &format!("{app_slug}/"));
         }
 
-        let is_template = entry.path().extension() == Some(OsStr::new("jinja2"));
+        let is_template = path_str.ends_with(".jinja2");
         let target_path = if is_template {
             let trimmed = path_str.trim_end_matches(".jinja2");
             target_dir.join(trimmed)
@@ -505,9 +594,9 @@ fn process_template_directory(
                 .map_err(|err| format!("Failed to create directory: {err}"))?;
         }
 
+        let content = get_template_content(file_path)?;
+
         if is_template {
-            let content = fs::read_to_string(entry.path())
-                .map_err(|err| format!("Failed to read template: {err}"))?;
             let mut context = Context::new();
             context.insert("app_name", app_name);
             context.insert("app_slug", app_slug);
@@ -517,18 +606,69 @@ fn process_template_directory(
             );
             let rendered = tera::Tera::one_off(&content, &context, false).map_err(|err| {
                 format!(
-                    "File {} in template is not tera compatible. File content: {content}\nError: {err}",
-                    entry.path().display()
+                    "Template {file_path} is not tera compatible. Content: {content}\nError: {err}",
                 )
             })?;
             fs::write(&target_path, rendered)
                 .map_err(|err| format!("Failed to write template output: {err}"))?;
         } else {
-            fs::copy(entry.path(), &target_path)
-                .map_err(|err| format!("Failed to copy template file: {err}"))?;
+            fs::write(&target_path, content.as_bytes())
+                .map_err(|err| format!("Failed to write template file: {err}"))?;
         }
     }
     Ok(())
+}
+
+/// Programmatically add `[tool.apx.ui]` config and hatch build exclude to pyproject.toml.
+/// Idempotent — skips if already configured.
+pub(crate) fn merge_ui_pyproject_config(app_dir: &Path, app_slug: &str) -> Result<(), String> {
+    use toml_edit::{Item, Table};
+
+    let pyproject_path = app_dir.join("pyproject.toml");
+    modify_pyproject(&pyproject_path, |doc| {
+        let tool = doc["tool"].or_insert(Item::Table(Table::new()));
+        let apx = tool["apx"].or_insert(Item::Table(Table::new()));
+        let apx_table = apx.as_table_mut().ok_or("tool.apx is not a table")?;
+
+        if apx_table.contains_key("ui") {
+            return Ok(()); // Already configured
+        }
+
+        let mut ui = Table::new();
+        ui["root"] = Item::Value(format!("src/{}/ui", app_slug).into());
+
+        let mut registries = Table::new();
+        registries["@animate-ui"] = Item::Value("https://animate-ui.com/r/{name}.json".into());
+        registries["@ai-elements"] = Item::Value("https://registry.ai-sdk.dev/{name}.json".into());
+        registries["@svgl"] = Item::Value("https://svgl.app/r/{name}.json".into());
+        ui["registries"] = Item::Table(registries);
+
+        apx_table["ui"] = Item::Table(ui);
+
+        // Add hatch build exclude for UI dir
+        let hatch = tool["hatch"].or_insert(Item::Table(Table::new()));
+        let build = hatch["build"].or_insert(Item::Table(Table::new()));
+        let build_table = build
+            .as_table_mut()
+            .ok_or("tool.hatch.build is not a table")?;
+
+        let exclude = build_table["exclude"].or_insert(Item::Value(toml_edit::Value::Array(
+            toml_edit::Array::new(),
+        )));
+        let exclude_arr = exclude
+            .as_array_mut()
+            .ok_or("tool.hatch.build.exclude is not an array")?;
+
+        let ui_exclude = format!("src/{}/ui", app_slug);
+        let already = exclude_arr
+            .iter()
+            .any(|v| v.as_str() == Some(ui_exclude.as_str()));
+        if !already {
+            exclude_arr.push(ui_exclude.as_str());
+        }
+
+        Ok(())
+    })
 }
 
 async fn is_in_git_repo(path: &Path) -> Result<bool, String> {
@@ -844,5 +984,60 @@ members = ["libs/*"]
 
         let content = fs::read_to_string(&pyproject).unwrap();
         assert!(content.contains("src/apps/*"), "content: {content}");
+    }
+
+    #[test]
+    fn test_merge_ui_pyproject_config() {
+        let dir = TempDir::new().unwrap();
+        let pyproject_path = create_test_pyproject(dir.path());
+
+        // Add [tool.apx.metadata] first (like a real init would)
+        modify_pyproject(&pyproject_path, |doc| {
+            let tool = doc["tool"].or_insert(Item::Table(Table::new()));
+            let apx = tool["apx"].or_insert(Item::Table(Table::new()));
+            let apx_table = apx.as_table_mut().ok_or("not a table")?;
+            let mut meta = Table::new();
+            meta["app-name"] = Item::Value("test-app".into());
+            apx_table["metadata"] = Item::Table(meta);
+
+            let hatch = tool["hatch"].or_insert(Item::Table(Table::new()));
+            let build = hatch["build"].or_insert(Item::Table(Table::new()));
+            let build_table = build.as_table_mut().ok_or("not a table")?;
+            build_table["artifacts"] =
+                Item::Value(toml_edit::Value::Array(toml_edit::Array::new()));
+            Ok(())
+        })
+        .unwrap();
+
+        merge_ui_pyproject_config(dir.path(), "test_app").unwrap();
+
+        let content = fs::read_to_string(&pyproject_path).unwrap();
+        assert!(content.contains("[tool.apx.ui]"));
+        assert!(content.contains("src/test_app/ui"));
+        assert!(content.contains("@animate-ui"));
+        assert!(content.contains("src/test_app/ui")); // in exclude
+    }
+
+    #[test]
+    fn test_merge_ui_pyproject_config_idempotent() {
+        let dir = TempDir::new().unwrap();
+        let pyproject_path = create_test_pyproject(dir.path());
+
+        modify_pyproject(&pyproject_path, |doc| {
+            let tool = doc["tool"].or_insert(Item::Table(Table::new()));
+            let apx = tool["apx"].or_insert(Item::Table(Table::new()));
+            let apx_table = apx.as_table_mut().ok_or("not a table")?;
+            let mut meta = Table::new();
+            meta["app-name"] = Item::Value("test-app".into());
+            apx_table["metadata"] = Item::Table(meta);
+            Ok(())
+        })
+        .unwrap();
+
+        merge_ui_pyproject_config(dir.path(), "test_app").unwrap();
+        merge_ui_pyproject_config(dir.path(), "test_app").unwrap();
+
+        let content = fs::read_to_string(&pyproject_path).unwrap();
+        assert_eq!(content.matches("[tool.apx.ui]").count(), 1);
     }
 }
