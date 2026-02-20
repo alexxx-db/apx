@@ -11,10 +11,13 @@ apx is the toolkit for building full-stack Databricks Apps with React + FastAPI.
 ## Prerequisites
 
 Before using apx, verify the CLI is installed:
+
 ```bash
 apx --version
 ```
+
 If not installed:
+
 - **macOS/Linux:** `curl -fsSL https://databricks-solutions.github.io/apx/install.sh | sh`
 - **Windows (PowerShell):** `irm https://databricks-solutions.github.io/apx/install.ps1 | iex`
 
@@ -25,6 +28,16 @@ If not installed:
 - Managing dev servers, checking errors, or viewing logs
 - Adding shadcn/ui components or frontend dependencies
 - Deploying or debugging Databricks Apps
+
+## Quick Start
+
+The project follows standard apx conventions. Use MCP tools and pattern files instead of exploring the codebase:
+
+1. **`routes`** — Call this first to see all API routes. Do NOT read source files to explore.
+2. **`docs`** — Search SDK docs for the method you need (e.g. "jobs list") before writing any `ws.*` call.
+3. **Follow patterns** — See [backend-patterns.md](backend-patterns.md) for models, routers, pagination, and DI.
+4. **`refresh_openapi`** — Run after adding/modifying backend routes so frontend hooks update automatically.
+5. **`check`** — Run type checks to verify correctness after changes.
 
 ## Project Structure
 
@@ -44,18 +57,18 @@ src/<app>/
 
 ## CLI Commands
 
-| Command | Description |
-|---------|-------------|
-| `apx dev start` | Start all dev servers (backend + frontend + OpenAPI watcher) |
-| `apx dev stop` | Stop all dev servers |
-| `apx dev status` | Check status of running servers |
-| `apx dev check` | Check for TypeScript/Python errors |
-| `apx dev logs` | View recent logs (default: last 10m) |
-| `apx dev logs -f` | Follow/stream logs in real-time |
-| `apx build` | Build for production |
-| `apx bun <args>` | Run bun commands (install, add, etc.) |
-| `apx components add <name>` | Add a shadcn/ui component |
-| `apx init --as-member` | Add apx to an existing project as a uv workspace member |
+| Command                     | Description                                                  |
+| --------------------------- | ------------------------------------------------------------ |
+| `apx dev start`             | Start all dev servers (backend + frontend + OpenAPI watcher) |
+| `apx dev stop`              | Stop all dev servers                                         |
+| `apx dev status`            | Check status of running servers                              |
+| `apx dev check`             | Check for TypeScript/Python errors                           |
+| `apx dev logs`              | View recent logs (default: last 10m)                         |
+| `apx dev logs -f`           | Follow/stream logs in real-time                              |
+| `apx build`                 | Build for production                                         |
+| `apx bun <args>`            | Run bun commands (install, add, etc.)                        |
+| `apx components add <name>` | Add a shadcn/ui component                                    |
+| `apx init --as-member`      | Add apx to an existing project as a uv workspace member      |
 
 ## Adding to an Existing Project
 
@@ -72,6 +85,7 @@ apx init
 Auto-detected: running `apx init` in a directory with an existing `pyproject.toml` (without `[tool.apx]`) automatically uses member mode with default path `packages/app`.
 
 The command:
+
 - Creates app files in the member subdirectory (e.g. `packages/app`)
 - Configures `[tool.uv.workspace]` in the root `pyproject.toml`
 - Initializes git at the workspace root if needed
@@ -80,21 +94,21 @@ The command:
 
 When the apx MCP server is running, these tools are available:
 
-| Tool | Description |
-|------|-------------|
-| `start` | Start the development server and return its URL. Call before testing UI or API changes. |
-| `stop` | Stop the development server. |
-| `restart` | Restart the development server (preserves port). Use after backend code changes. |
-| `logs` | Fetch recent dev server logs. Use to diagnose runtime errors or startup issues. |
-| `check` | Run TypeScript and Python type checks in parallel. Returns categorized errors. Call after making changes to verify correctness. |
-| `routes` | List all API routes with their parameters, request/response schemas, and generated hook names. Call this first to understand the project's API surface before reading source files. |
-| `get_route_info` | Get a complete frontend code example for a specific API route, including Suspense/ErrorBoundary scaffold and correct hook usage with parameters. Call this before writing any frontend code that uses an API route. Pass the operation_id from the routes tool. |
-| `refresh_openapi` | Regenerate the OpenAPI schema and TypeScript API client from backend routes. Run after adding or modifying backend routes. |
-| `search_registry_components` | Semantic search for UI components across configured registries (shadcn, etc). Returns component IDs usable with add_component. |
-| `add_component` | Install a UI component into the project. Accepts 'component-name' (default registry) or '@registry-name/component-name'. |
-| `list_registry_components` | List all available components in a registry. Defaults to shadcn registry if none specified. |
-| `docs` | Search Databricks SDK documentation for Python code examples and API references. Always call this before writing any Databricks SDK (ws.*) call to verify the correct method signature. |
-| `databricks_apps_logs` | Fetch logs from a deployed Databricks App using the Databricks CLI. Use for debugging deployed (not local dev) issues. |
+| Tool                         | Description                                                                                                                                                                                                                                                     |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `start`                      | Start the development server and return its URL. Call before testing UI or API changes.                                                                                                                                                                         |
+| `stop`                       | Stop the development server.                                                                                                                                                                                                                                    |
+| `restart`                    | Restart the development server (preserves port). Use after backend code changes.                                                                                                                                                                                |
+| `logs`                       | Fetch recent dev server logs. Use to diagnose runtime errors or startup issues.                                                                                                                                                                                 |
+| `check`                      | Run TypeScript and Python type checks in parallel. Returns categorized errors. Call after making changes to verify correctness.                                                                                                                                 |
+| `routes`                     | List all API routes with their parameters, request/response schemas, and generated hook names. Call this first to understand the project's API surface before reading source files.                                                                             |
+| `get_route_info`             | Get a complete frontend code example for a specific API route, including Suspense/ErrorBoundary scaffold and correct hook usage with parameters. Call this before writing any frontend code that uses an API route. Pass the operation_id from the routes tool. |
+| `refresh_openapi`            | Regenerate the OpenAPI schema and TypeScript API client from backend routes. Run after adding or modifying backend routes.                                                                                                                                      |
+| `search_registry_components` | Semantic search for UI components across configured registries (shadcn, etc). Returns component IDs usable with add_component.                                                                                                                                  |
+| `add_component`              | Install a UI component into the project. Accepts 'component-name' (default registry) or '@registry-name/component-name'.                                                                                                                                        |
+| `list_registry_components`   | List all available components in a registry. Defaults to shadcn registry if none specified.                                                                                                                                                                     |
+| `docs`                       | Search Databricks SDK documentation for Python code examples and API references. Always call this before writing any Databricks SDK (ws.\*) call to verify the correct method signature.                                                                        |
+| `databricks_apps_logs`       | Fetch logs from a deployed Databricks App using the Databricks CLI. Use for debugging deployed (not local dev) issues.                                                                                                                                          |
 
 ## Recommended Workflow
 
@@ -114,7 +128,15 @@ When the apx MCP server is running, these tools are available:
 - When using the API calls on the frontend, use error boundaries to handle errors.
 - Run `apx dev check` command (via CLI or MCP) to check for errors in the project code after making changes.
 - If agent has access to native browser tool, use it to verify changes on the frontend. If such tool is not present or is not working, use playwright MCP to automate browser actions.
-- **Databricks SDK:** Use the apx MCP `docs` tool to search Databricks SDK documentation instead of guessing or hallucinating API signatures.
+
+### Databricks SDK
+
+- **SDK first:** Always use `databricks-sdk` (`WorkspaceClient`) methods for Databricks operations. Never use raw `requests`/`httpx` calls or `ws.api_client.do()` to call Databricks REST APIs.
+- **Verify signatures:** Call the `docs` MCP tool before writing any `ws.*` call to confirm the exact method name, parameters, and return type.
+- SDK listing methods (e.g. `ws.jobs.list()`, `ws.clusters.list()`) return **lazy iterators** that auto-paginate — do NOT manually manage API pagination tokens when calling SDK methods.
+- **SDK dataclasses are Pydantic-compatible** — use them directly in `response_model` or compose into custom models: `class MyResponse(BaseModel): payload: SdkDataclass`.
+- Inject the WorkspaceClient via `Dependency.Client` (service principal) or `Dependency.UserClient` (OBO) — never construct it manually.
+- For paginated list endpoints, see [Backend Patterns — SDK Listing with Pagination](backend-patterns.md#sdk-listing-with-pagination).
 
 ### Package Management
 
@@ -123,20 +145,31 @@ When the apx MCP server is running, these tools are available:
 
 ### Component Management
 
-- **Finding components:** Use MCP `search_registry_components` to search for available shadcn/ui components.
-- **Adding components:** Use MCP `add_component` or CLI `apx components add <component> --yes` to add components.
-- **Component location:** If component was added to a wrong location (e.g. stored into `src/components` instead of `src/<app>/ui/components`), move it to the proper folder.
-- **Component organization:** Prefer grouping components by functionality rather than by file type (e.g. `src/<app>/ui/components/chat/`).
+- **Check configured registries first:** Before creating custom components, check `[tool.apx.ui.registries]` in `pyproject.toml` for domain-specific registries (e.g. `@ai-elements` for chat/AI components, `@animate-ui` for animations). Use `list_registry_components` with the registry name to browse all available components.
+- **Finding components:** Use MCP `search_registry_components` to search across all registries. Results from project-configured registries are boosted in scoring.
+- **Adding components:** Use MCP `add_component` or CLI `apx components add <component> --yes`. For custom registries: `@registry-name/component-name`.
+- **Component location:** If a component was added to a wrong location (e.g. `src/components/` instead of `src/<app>/ui/components/`), move it to the proper folder.
+- **Component organization:** Group components by functionality (e.g. `src/<app>/ui/components/chat/`).
 
 ## Reference Files
 
 For detailed patterns and code examples, see:
+
 - [Backend Patterns](backend-patterns.md) — DI, 3-model pattern, CRUD routers, lifespan, AppConfig
 - [Frontend Patterns](frontend-patterns.md) — Suspense, mutations, selector, component conventions
 
 ## Resources
 
-- OpenAPI client: `src/<app>/ui/lib/api/` (auto-generated)
+- OpenAPI client: `src/<app>/ui/lib/api.ts` (auto-generated).
+  Example:
+  ```ts
+  import { api } from "@/lib/api";
+  ```
+- Selector: `src/<app>/ui/lib/selector.ts`
+  Example:
+  ```ts
+  import { selector } from "@/lib/selector";
+  ```
 - Routes: `src/<app>/ui/routes/`
 - Components: `src/<app>/ui/components/`
 - Backend: `src/<app>/backend/`
