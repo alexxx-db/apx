@@ -7,7 +7,7 @@ use crate::common::{
     ApxCommand, OutputMode, emit, ensure_dir, format_elapsed_ms, handle_spawn_error,
     run_preflight_checks, spinner_for_mode,
 };
-use crate::dev::client::{HealthCheckConfig, health, status, stop as stop_server};
+use crate::dev::client::{HealthCheckConfig, HealthError, health, status, stop as stop_server};
 use crate::dev::common::{
     BIND_HOST, DevLock, is_process_running, lock_path, read_lock, remove_lock, write_lock,
 };
@@ -52,11 +52,15 @@ pub async fn resolve_existing_server(
 /// Start a dev server for the given app directory.
 /// If a server is already running and healthy, returns its port.
 /// Otherwise spawns a new server subprocess.
-pub async fn start_dev_server(app_dir: &Path, mode: OutputMode) -> Result<u16, String> {
+pub async fn start_dev_server(
+    app_dir: &Path,
+    skip_healthcheck: bool,
+    mode: OutputMode,
+) -> Result<u16, String> {
     if let Some(port) = resolve_existing_server(app_dir, mode).await? {
         return Ok(port);
     }
-    spawn_server(app_dir, None, false, 60, mode).await
+    spawn_server(app_dir, None, false, 60, skip_healthcheck, mode).await
 }
 
 /// Run preflight checks and display progress.
@@ -173,16 +177,18 @@ async fn wait_for_healthy_with_logs(
                         }
 
                         if status_response.failed {
-                            debug!(
-                                "Process failure detected after {}ms - frontend: {}, backend: {}",
+                            warn!(
+                                "Process failure detected after {}ms - frontend: {}, backend: {}, db: {}",
                                 elapsed_ms,
                                 status_response.frontend_status,
-                                status_response.backend_status
+                                status_response.backend_status,
+                                status_response.db_status
                             );
                             return Err(format!(
-                                "Process failed and cannot recover. Frontend: {}, Backend: {}",
+                                "Process failed and cannot recover. Frontend: {}, Backend: {}, DB: {}",
                                 status_response.frontend_status,
-                                status_response.backend_status
+                                status_response.backend_status,
+                                status_response.db_status
                             ));
                         }
 
@@ -226,10 +232,20 @@ async fn wait_for_healthy_with_logs(
                     Err(e) => {
                         let should_log = attempt_count <= 5 || elapsed_ms % 5000 < 250;
                         if should_log {
-                            debug!(
-                                "Health check attempt {} ({}ms) - connection failed: {}",
-                                attempt_count, elapsed_ms, e
-                            );
+                            match &e {
+                                HealthError::ConnectionFailed(msg) => {
+                                    debug!(
+                                        "Health check attempt {} ({}ms) - no connection (server not listening yet): {}",
+                                        attempt_count, elapsed_ms, msg
+                                    );
+                                }
+                                HealthError::ServerError(msg) => {
+                                    warn!(
+                                        "Health check attempt {} ({}ms) - server error (server is up but responded with error): {}",
+                                        attempt_count, elapsed_ms, msg
+                                    );
+                                }
+                            }
                         }
                         last_overall_status = None;
                     }
@@ -257,6 +273,7 @@ pub async fn spawn_server(
     preferred_port: Option<u16>,
     skip_credentials_validation: bool,
     timeout_secs: u64,
+    skip_healthcheck: bool,
     mode: OutputMode,
 ) -> Result<u16, String> {
     let start_time = Instant::now();
@@ -326,6 +343,21 @@ pub async fn spawn_server(
         .env("APX_APP_DIR", &canonical_app_dir)
         .spawn()
         .map_err(|err| handle_spawn_error("apx", err))?;
+
+    if skip_healthcheck {
+        let pid = child.id().ok_or("Failed to get child process ID")?;
+        let lock = DevLock::new(pid, port, command, app_dir);
+        write_lock(&lock_path, &lock)?;
+
+        emit(
+            mode,
+            &format!(
+                "✅ Dev server started at http://localhost:{port} in {} (healthcheck skipped)\n",
+                format_elapsed_ms(start_time)
+            ),
+        );
+        return Ok(port);
+    }
 
     emit(mode, "⏳ Waiting for dev server to become healthy...\n");
     let config = HealthCheckConfig {
@@ -441,7 +473,11 @@ pub async fn stop_dev_server(app_dir: &Path, mode: OutputMode) -> Result<bool, S
 
 /// Restart the dev server for the given app directory.
 /// Preserves the port if an existing server is found.
-pub async fn restart_dev_server(app_dir: &Path, mode: OutputMode) -> Result<u16, String> {
+pub async fn restart_dev_server(
+    app_dir: &Path,
+    skip_healthcheck: bool,
+    mode: OutputMode,
+) -> Result<u16, String> {
     let lock_path = lock_path(app_dir);
     let preferred_port = if lock_path.exists() {
         let lock = read_lock(&lock_path)?;
@@ -458,7 +494,7 @@ pub async fn restart_dev_server(app_dir: &Path, mode: OutputMode) -> Result<u16,
         None
     };
 
-    let port = spawn_server(app_dir, preferred_port, false, 60, mode).await?;
+    let port = spawn_server(app_dir, preferred_port, false, 60, skip_healthcheck, mode).await?;
     emit(
         mode,
         &format!("✅ Dev server restarted at http://localhost:{port}\n"),
