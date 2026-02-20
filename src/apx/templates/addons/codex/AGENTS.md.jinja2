@@ -29,7 +29,7 @@ The `Dependency` class in `src/{{app_name}}/backend/core.py` provides typed Fast
 | `Dependency.Client` | `WorkspaceClient` | Databricks client using app-level service principal credentials |
 | `Dependency.UserClient` | `WorkspaceClient` | Databricks client authenticated on behalf of the current user (requires OBO token) |
 | `Dependency.Config` | `AppConfig` | Application configuration loaded from environment variables |
-| `Dependency.Session` | `Session` | SQLModel database session, scoped to request (stateful apps only) |
+| `Dependency.Session` | `Session` | SQLModel database session, scoped to request (requires lakebase addon) |
 
 **Usage in route handlers:**
 ```python
@@ -132,3 +132,5 @@ When the apx MCP server is available, use these tools:
 | `docs` | Search Databricks SDK documentation for code examples and API references |
 | `databricks_apps_logs` | Fetch logs from deployed Databricks app using Databricks CLI |
 | `get_route_info` | Get code example for using a specific API route |
+| `feedback_prepare` | Prepare a feedback issue for review. Returns formatted title, body, and browser URL |
+| `feedback_submit` | Submit a prepared feedback issue as a public GitHub issue |
