@@ -80,7 +80,7 @@ fn wait_for_ready(timeout_ms: u64) -> Result<(), String> {
     let timeout = Duration::from_millis(timeout_ms);
 
     while start.elapsed() < timeout {
-        let addr = std::net::SocketAddr::from(([127, 0, 0, 1], FLUX_PORT));
+        let addr = std::net::SocketAddr::from((apx_common::hosts::CLIENT_HOST_OCTETS, FLUX_PORT));
         if std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(100)).is_ok() {
             return Ok(());
         }
@@ -141,11 +141,28 @@ pub fn start() -> Result<(), String> {
 /// Ensure flux is running, starting it if necessary.
 ///
 /// This is the main API for callers like `apx dev start` that need to ensure
-/// flux is running before proceeding.
+/// flux is running before proceeding. Also checks that the running daemon
+/// matches the current apx version — restarts on mismatch.
 pub fn ensure_running() -> Result<(), String> {
     if is_running() {
-        debug!("Flux is already running");
-        return Ok(());
+        // Check version from lock file
+        if let Some(lock) = read_lock()? {
+            if lock.version.as_deref() == Some(apx_common::VERSION) {
+                debug!("Flux is already running (version matches)");
+                return Ok(());
+            }
+            // Version mismatch or old lock without version — restart
+            info!(
+                "Flux version mismatch (running: {:?}, expected: {}), restarting",
+                lock.version,
+                apx_common::VERSION
+            );
+            stop()?;
+            // Fall through to start()
+        } else {
+            debug!("Flux is already running (no lock file to check version)");
+            return Ok(());
+        }
     }
     start()
 }

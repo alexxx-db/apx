@@ -21,24 +21,43 @@ use tokio::sync::Mutex;
 use tokio::time::{Duration, timeout};
 use tracing::{debug, info, warn};
 
+/// Server-side probe timeout in seconds.
+/// Must be strictly less than the client-side per-request timeout (DEFAULT_TIMEOUT_SECS in client.rs)
+/// to avoid a race where both timeouts fire simultaneously, causing every poll cycle to fail.
+const PROBE_TIMEOUT_SECS: u64 = 1;
+
 /// Shared HTTP client for health probes.
 /// Reused across all health checks to avoid creating a new client per probe.
 static HEALTH_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
     reqwest::Client::builder()
-        .timeout(Duration::from_secs(2))
+        .timeout(Duration::from_secs(PROBE_TIMEOUT_SECS))
+        .redirect(reqwest::redirect::Policy::none())
         .pool_max_idle_per_host(2)
+        .no_gzip()
+        .no_brotli()
+        .no_deflate()
         .build()
         .unwrap_or_else(|_| reqwest::Client::new())
 });
 
+/// Result of an HTTP health probe against a backend/frontend service.
+/// Fields are used for logging inside `http_health_probe`.
+#[allow(dead_code)]
+enum ProbeResult {
+    /// Service responded with the given HTTP status code — it is up.
+    Responded(u16),
+    /// Connection or timeout error — service is not ready yet.
+    Failed(String),
+}
+
 use crate::common::{ApxCommand, BunCommand, UvCommand, handle_spawn_error, read_project_metadata};
-use crate::dev::common::CLIENT_HOST;
 use crate::dev::otel::forward_log_to_flux;
 use crate::dotenv::DotenvFile;
 use crate::python_logging::{
     DevConfig, LogConfigResult, default_logging_config, resolve_log_config,
     write_logging_config_json,
 };
+use apx_common::hosts::CLIENT_HOST;
 
 #[derive(Debug, Clone, Copy)]
 enum LogSource {
@@ -61,12 +80,10 @@ impl fmt::Display for LogSource {
     }
 }
 
-/// Format a log line with timestamp and source prefix.
-/// Output: `2026-01-28 14:09:02.413 |  app | <message>`
+/// Format a log line with local timestamp and source prefix.
+/// Delegates to the centralized formatter in `apx_common::format`.
 fn format_log_line(source: LogSource, message: &str) -> String {
-    let now = chrono::Utc::now();
-    let timestamp = now.format("%Y-%m-%d %H:%M:%S%.3f");
-    format!("{timestamp} | {source:>4} | {message}")
+    apx_common::format::format_process_log_line(source.as_str(), message)
 }
 
 /// Setup sitecustomize.py for Databricks SDK user-agent tracking.
@@ -159,7 +176,9 @@ impl ProcessManager {
             host: host.to_string(),
             dev_token,
             db_password,
-            app_dir: app_dir.to_path_buf(),
+            app_dir: app_dir
+                .canonicalize()
+                .unwrap_or_else(|_| app_dir.to_path_buf()),
             app_slug,
             app_entrypoint,
             dotenv_vars,
@@ -345,8 +364,9 @@ impl ProcessManager {
         // OpenTelemetry configuration - frontend sends logs directly to flux
         cmd.env(
             "OTEL_EXPORTER_OTLP_ENDPOINT",
-            format!("http://127.0.0.1:{}", crate::flux::FLUX_PORT),
+            format!("http://{}:{}", CLIENT_HOST, crate::flux::FLUX_PORT),
         );
+        cmd.env(apx_common::hosts::ENV_FRONTEND_HOST, CLIENT_HOST);
         cmd.env("OTEL_SERVICE_NAME", format!("{}_ui", self.app_slug));
 
         let child = cmd.spawn().map_err(|err| handle_spawn_error("apx", err))?;
@@ -448,7 +468,8 @@ impl ProcessManager {
                 let mut lines = reader.lines();
                 while let Ok(Some(line)) = lines.next_line().await {
                     eprintln!("{}", format_log_line(LogSource::App, &line));
-                    forward_log_to_flux(&line, "ERROR", &service_name, &app_path).await;
+                    let severity = apx_common::format::parse_python_severity(&line);
+                    forward_log_to_flux(&line, severity, &service_name, &app_path).await;
                 }
             });
         }
@@ -787,7 +808,8 @@ impl ProcessManager {
                 let mut lines = reader.lines();
                 while let Ok(Some(line)) = lines.next_line().await {
                     eprintln!("{}", format_log_line(source, &line));
-                    forward_log_to_flux(&line, "ERROR", &service_name, &app_path).await;
+                    let severity = apx_common::format::parse_python_severity(&line);
+                    forward_log_to_flux(&line, severity, &service_name, &app_path).await;
                 }
             });
         }
@@ -959,7 +981,8 @@ impl ProcessManager {
                 let mut lines = reader.lines();
                 while let Ok(Some(line)) = lines.next_line().await {
                     eprintln!("{}", format_log_line(LogSource::App, &line));
-                    forward_log_to_flux(&line, "ERROR", &service_name, &app_path).await;
+                    let severity = apx_common::format::parse_python_severity(&line);
+                    forward_log_to_flux(&line, severity, &service_name, &app_path).await;
                 }
             });
         }
@@ -1238,41 +1261,34 @@ impl ProcessManager {
 
         match http_check {
             None => "healthy".to_string(), // DB: running = healthy
-            Some((host, port)) => {
-                if Self::http_health_probe(host, port).await {
-                    "healthy".to_string()
-                } else {
-                    "starting".to_string()
-                }
-            }
+            Some((host, port)) => match Self::http_health_probe(host, port).await {
+                ProbeResult::Responded(_) => "healthy".to_string(),
+                ProbeResult::Failed(_) => "starting".to_string(),
+            },
         }
     }
 
-    /// Check if a service is healthy by making an HTTP GET request to its root path.
-    /// Returns true if the service responds with any HTTP status code (even 5xx).
-    /// Only connection failures indicate the server isn't ready yet.
-    async fn http_health_probe(host: &str, port: u16) -> bool {
+    /// Probe a service by making an HTTP GET request to its root path.
+    /// Any HTTP response (regardless of status code) means the server is up.
+    /// Only connection/timeout failures indicate the server isn't ready yet.
+    async fn http_health_probe(host: &str, port: u16) -> ProbeResult {
         let url = format!("http://{host}:{port}/");
+        let start = std::time::Instant::now();
         match HEALTH_CLIENT.get(&url).send().await {
             Ok(resp) => {
-                let status = resp.status();
-                if !status.is_success() {
-                    let body = resp.text().await.unwrap_or_default();
-                    let body_preview = if body.len() > 500 {
-                        &body[..500]
-                    } else {
-                        &body
-                    };
-                    debug!(
-                        %url, %status, body = %body_preview,
-                        "Health probe got non-success response (server is up but returned error)."
-                    );
+                let status = resp.status().as_u16();
+                let elapsed_ms = start.elapsed().as_millis();
+                if status == 200 {
+                    debug!(url = %url, status, elapsed_ms, "Health probe OK");
+                } else {
+                    warn!(url = %url, status, elapsed_ms, "Health probe returned non-200");
                 }
-                true
+                ProbeResult::Responded(status)
             }
             Err(err) => {
-                debug!(%url, error = %err, "Health probe connection failed.");
-                false
+                let elapsed_ms = start.elapsed().as_millis();
+                debug!(url = %url, error = %err, elapsed_ms, "Health probe failed");
+                ProbeResult::Failed(err.to_string())
             }
         }
     }

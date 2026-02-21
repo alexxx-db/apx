@@ -14,6 +14,8 @@
 //! This crate contains shared functionality used by both the main `apx` CLI
 //! and the standalone `apx-agent` binary.
 
+pub mod format;
+pub mod hosts;
 pub mod storage;
 
 use serde::{Deserialize, Serialize};
@@ -25,8 +27,11 @@ use std::time::Duration;
 // Re-export commonly used types
 pub use storage::{
     AggregatedRecord, LogAggregator, LogRecord, flux_dir, get_aggregation_key, should_skip_log,
-    source_label,
+    should_skip_log_message, source_label,
 };
+
+/// Version of the apx-common crate, used for agent version matching.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Flux port for OTLP HTTP receiver
 pub const FLUX_PORT: u16 = 11111;
@@ -43,6 +48,8 @@ pub struct FluxLock {
     pub pid: u32,
     pub port: u16,
     pub started_at: i64,
+    #[serde(default)]
+    pub version: Option<String>,
 }
 
 impl FluxLock {
@@ -57,6 +64,7 @@ impl FluxLock {
             pid,
             port: FLUX_PORT,
             started_at,
+            version: Some(VERSION.to_string()),
         }
     }
 }
@@ -113,7 +121,7 @@ pub fn remove_lock() -> Result<(), String> {
 
 /// Check if flux is accepting connections at the given port.
 pub fn is_flux_listening(port: u16) -> bool {
-    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+    let addr = std::net::SocketAddr::from((hosts::CLIENT_HOST_OCTETS, port));
     TcpStream::connect_timeout(&addr, Duration::from_millis(500)).is_ok()
 }
 

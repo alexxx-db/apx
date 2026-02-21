@@ -6,7 +6,7 @@
 """Generate a test project using a local apx build.
 
 Usage:
-    uv run --script scripts/dev/gen.py <folder> <profile> [extra-args...]
+    uv run --script scripts/dev/gen.py <folder> [profile] [extra-args...]
 
 Steps:
     1. maturin build -j 6 -o dist
@@ -105,11 +105,15 @@ def patch_pyproject(pyproject_path: Path, wheel_path: Path) -> None:
     # Replace apx dependency in [dependency-groups].dev with local wheel path
     dev_deps = doc.get("dependency-groups", {}).get("dev", [])
     new_deps = []
+    found_apx = False
     for dep in dev_deps:
         if isinstance(dep, str) and dep.startswith("apx"):
             new_deps.append(f"apx @ {wheel_path.as_uri()}")
+            found_apx = True
         else:
             new_deps.append(dep)
+    if not found_apx:
+        new_deps.append(f"apx @ {wheel_path.as_uri()}")
 
     dep_groups = doc.get("dependency-groups", {})
     dep_groups["dev"] = new_deps
@@ -151,23 +155,24 @@ def patch_mcp_json(folder: Path) -> None:
 
 
 def main() -> None:
-    if len(sys.argv) < 3:
+    if len(sys.argv) < 2:
         print(
-            f"{RED}Usage: uv run --script scripts/dev/gen.py <folder> <profile> [extra-args...]{RESET}",
+            f"{RED}Usage: uv run --script scripts/dev/gen.py <folder> [profile] [extra-args...]{RESET}",
             file=sys.stderr,
         )
         sys.exit(1)
 
     folder = Path(sys.argv[1])
-    profile = sys.argv[2]
-    extra_args = sys.argv[3:]
+    profile = sys.argv[2] if len(sys.argv) >= 3 else None
+    extra_args = sys.argv[3:] if profile else sys.argv[2:]
 
     project_root = Path(__file__).resolve().parent.parent.parent
     dist_dir = project_root / "dist"
     total = 7
 
+    profile_label = profile or "interactive"
     print(
-        f"{BOLD}apx gen{RESET} — folder={YELLOW}{folder}{RESET} profile={YELLOW}{profile}{RESET}",
+        f"{BOLD}apx gen{RESET} — folder={YELLOW}{folder}{RESET} profile={YELLOW}{profile_label}{RESET}",
         end="",
     )
     if extra_args:
@@ -178,46 +183,51 @@ def main() -> None:
     t_total = time.monotonic()
 
     try:
-        with stage("Building wheel", 1, total):
+        with stage("Cleaning up dist directory", 1, total):
+            if dist_dir.exists():
+                shutil.rmtree(dist_dir)
+                print(f"  Removed {dist_dir}")
+            else:
+                print(f"  {DIM}Nothing to remove{RESET}")
+
+        with stage("Building wheel", 2, total):
             run(["maturin", "build", "-j", "6", "-o", "dist"], cwd=project_root)
 
         wheel = find_wheel(dist_dir)
         print(f"  Wheel: {YELLOW}{wheel.name}{RESET}")
 
-        with stage("Cleaning target folder", 2, total):
+        with stage("Cleaning target folder", 3, total):
             if folder.exists():
                 shutil.rmtree(folder)
                 print(f"  Removed {folder}")
             else:
                 print(f"  {DIM}Nothing to remove{RESET}")
 
-        with stage("Initializing project", 3, total):
-            run(
-                [
-                    "uvx",
-                    "--no-cache",
-                    "--from",
-                    str(wheel),
-                    "apx",
-                    "init",
-                    str(folder),
-                    "-p",
-                    profile,
-                ]
-                + extra_args,
-                env={**os.environ, "RUST_LOG": "DEBUG"},
-            )
+        with stage("Initializing project", 4, total):
+            cmd = [
+                "uvx",
+                "--no-cache",
+                "--from",
+                str(wheel),
+                "apx",
+                "init",
+                str(folder),
+            ]
+            if profile:
+                cmd += ["-p", profile]
+            cmd += extra_args
+            run(cmd, env={**os.environ, "RUST_LOG": "DEBUG"})
 
-        with stage("Patching pyproject.toml", 4, total):
+        with stage("Patching pyproject.toml", 5, total):
             patch_pyproject(folder / "pyproject.toml", wheel)
 
-        with stage("Patching MCP configs", 5, total):
+        with stage("Patching MCP configs", 6, total):
             patch_mcp_json(folder)
 
-        with stage("Syncing dependencies", 6, total):
+        with stage("Syncing dependencies", 7, total):
             run(["uv", "sync", "--reinstall-package", "apx"], cwd=folder)
 
-        with stage("Running dev check", 7, total):
+        with stage("Running dev check", 8, total):
             run(
                 ["uv", "run", "apx", "dev", "check"],
                 cwd=folder,

@@ -7,13 +7,15 @@ use crate::common::{
     ApxCommand, OutputMode, emit, ensure_dir, format_elapsed_ms, handle_spawn_error,
     run_preflight_checks, spinner_for_mode,
 };
-use crate::dev::client::{HealthCheckConfig, HealthError, health, status, stop as stop_server};
+use crate::dev::client::{HealthCheckConfig, health, stop as stop_server};
 use crate::dev::common::{
-    BIND_HOST, DevLock, is_process_running, lock_path, read_lock, remove_lock, write_lock,
+    DevLock, is_process_running, lock_path, read_lock, remove_lock, write_lock,
 };
 use crate::dev::process::ProcessManager;
 use crate::flux;
+use crate::ops::healthcheck::wait_for_healthy_with_logs;
 use crate::registry::Registry;
+use apx_common::hosts::{BIND_HOST, BROWSER_HOST};
 use tracing::{debug, warn};
 
 /// Prepare the app directory for dev server startup.
@@ -58,6 +60,10 @@ pub async fn start_dev_server(
     mode: OutputMode,
 ) -> Result<u16, String> {
     if let Some(port) = resolve_existing_server(app_dir, mode).await? {
+        emit(
+            mode,
+            &format!("Dev server is already running at http://{BROWSER_HOST}:{port}\n"),
+        );
         return Ok(port);
     }
     spawn_server(app_dir, None, false, 60, skip_healthcheck, mode).await
@@ -132,141 +138,6 @@ async fn wait_for_port_available(port: u16, mode: OutputMode) -> Result<(), Stri
     ))
 }
 
-/// Wait for dev server to become healthy while streaming logs line-by-line.
-async fn wait_for_healthy_with_logs(
-    port: u16,
-    config: &HealthCheckConfig,
-    app_dir: &Path,
-    mode: OutputMode,
-) -> Result<(), String> {
-    use crate::ops::startup_logs::StartupLogStreamer;
-
-    debug!(
-        "Starting health check with config: timeout={}s, retry_delay={}ms, initial_delay={}ms",
-        config.timeout_secs, config.retry_delay_ms, config.initial_delay_ms
-    );
-    tokio::time::sleep(Duration::from_millis(config.initial_delay_ms)).await;
-
-    let start_time = Instant::now();
-    let deadline = start_time + Duration::from_secs(config.timeout_secs);
-    let mut log_streamer = StartupLogStreamer::new(app_dir, mode).await;
-    let mut attempt_count = 0u32;
-    let mut last_overall_status: Option<String> = None;
-    let mut first_response_logged = false;
-    let mut ctrl_c = std::pin::pin!(tokio::signal::ctrl_c());
-
-    while Instant::now() < deadline {
-        tokio::select! {
-            _ = &mut ctrl_c => {
-                debug!("Received Ctrl+C, aborting startup");
-                return Err("Startup interrupted by user".to_string());
-            }
-            _ = tokio::time::sleep(Duration::from_millis(config.retry_delay_ms)) => {
-                log_streamer.print_new_logs().await;
-                attempt_count += 1;
-                let elapsed_ms = start_time.elapsed().as_millis();
-
-                match status(port).await {
-                    Ok(status_response) => {
-                        if !first_response_logged {
-                            debug!(
-                                "Server responding after {}ms (attempt {}) - now waiting for services",
-                                elapsed_ms, attempt_count
-                            );
-                            first_response_logged = true;
-                        }
-
-                        if status_response.failed {
-                            warn!(
-                                "Process failure detected after {}ms - frontend: {}, backend: {}, db: {}",
-                                elapsed_ms,
-                                status_response.frontend_status,
-                                status_response.backend_status,
-                                status_response.db_status
-                            );
-                            return Err(format!(
-                                "Process failed and cannot recover. Frontend: {}, Backend: {}, DB: {}",
-                                status_response.frontend_status,
-                                status_response.backend_status,
-                                status_response.db_status
-                            ));
-                        }
-
-                        if status_response.status == "ok" {
-                            debug!(
-                                "Health check PASSED on attempt {} after {}ms - services ready (frontend: {}, backend: {}, db: {})",
-                                attempt_count,
-                                elapsed_ms,
-                                status_response.frontend_status,
-                                status_response.backend_status,
-                                status_response.db_status
-                            );
-
-                            if status_response.db_status != "healthy" {
-                                emit(mode, "⚠️  Database not available: local development will work but DB features disabled");
-                            }
-
-                            return Ok(());
-                        }
-
-                        let status_str = format!(
-                            "status={}, fe={}, be={}, db={}",
-                            status_response.status,
-                            status_response.frontend_status,
-                            status_response.backend_status,
-                            status_response.db_status
-                        );
-
-                        let should_log = last_overall_status.as_ref() != Some(&status_str)
-                            || attempt_count <= 5
-                            || elapsed_ms % 5000 < 250;
-
-                        if should_log {
-                            debug!(
-                                "Health check attempt {} ({}ms) - {} [waiting for status='ok']",
-                                attempt_count, elapsed_ms, status_str
-                            );
-                        }
-                        last_overall_status = Some(status_str);
-                    }
-                    Err(e) => {
-                        let should_log = attempt_count <= 5 || elapsed_ms % 5000 < 250;
-                        if should_log {
-                            match &e {
-                                HealthError::ConnectionFailed(msg) => {
-                                    debug!(
-                                        "Health check attempt {} ({}ms) - no connection (server not listening yet): {}",
-                                        attempt_count, elapsed_ms, msg
-                                    );
-                                }
-                                HealthError::ServerError(msg) => {
-                                    warn!(
-                                        "Health check attempt {} ({}ms) - server error (server is up but responded with error): {}",
-                                        attempt_count, elapsed_ms, msg
-                                    );
-                                }
-                            }
-                        }
-                        last_overall_status = None;
-                    }
-                }
-            }
-        }
-    }
-
-    debug!(
-        "Health check TIMED OUT after {} attempts ({}ms). Last state: {:?}",
-        attempt_count,
-        start_time.elapsed().as_millis(),
-        last_overall_status
-    );
-
-    Err(format!(
-        "Dev server failed to become healthy after {}s timeout",
-        config.timeout_secs
-    ))
-}
-
 /// Spawn a new dev server subprocess (does not check for existing server).
 pub async fn spawn_server(
     app_dir: &Path,
@@ -338,7 +209,6 @@ pub async fn spawn_server(
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .env("APX_COLLECT_LOGS", "1")
         .env("APX_OTEL_LOGS", "1")
         .env("APX_APP_DIR", &canonical_app_dir)
         .spawn()
@@ -352,7 +222,7 @@ pub async fn spawn_server(
         emit(
             mode,
             &format!(
-                "✅ Dev server started at http://localhost:{port} in {} (healthcheck skipped)\n",
+                "✅ Dev server started at http://{BROWSER_HOST}:{port} in {} (healthcheck skipped)\n",
                 format_elapsed_ms(start_time)
             ),
         );
@@ -401,7 +271,7 @@ pub async fn spawn_server(
     emit(
         mode,
         &format!(
-            "✅ Dev server started at http://localhost:{port} in {}\n",
+            "✅ Dev server started at http://{BROWSER_HOST}:{port} in {}\n",
             format_elapsed_ms(start_time)
         ),
     );
@@ -484,7 +354,7 @@ pub async fn restart_dev_server(
         emit(
             mode,
             &format!(
-                "Found existing dev server at http://localhost:{port}",
+                "Found existing dev server at http://{BROWSER_HOST}:{port}",
                 port = lock.port
             ),
         );
@@ -497,7 +367,7 @@ pub async fn restart_dev_server(
     let port = spawn_server(app_dir, preferred_port, false, 60, skip_healthcheck, mode).await?;
     emit(
         mode,
-        &format!("✅ Dev server restarted at http://localhost:{port}\n"),
+        &format!("✅ Dev server restarted at http://{BROWSER_HOST}:{port}\n"),
     );
     Ok(port)
 }
