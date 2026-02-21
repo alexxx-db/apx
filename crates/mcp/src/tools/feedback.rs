@@ -2,7 +2,6 @@ use crate::server::ApxServer;
 use crate::tools::ToolResultExt;
 use rmcp::model::*;
 use rmcp::schemars;
-use serde::Serialize;
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct FeedbackPrepareArgs {
@@ -60,12 +59,13 @@ impl ApxServer {
             args.include_metadata,
         );
 
-        #[derive(Serialize)]
-        struct PrepareResponse {
-            title: String,
-            body: String,
-            browser_url: String,
-            note: &'static str,
+        tool_response! {
+            struct PrepareResponse {
+                title: String,
+                body: String,
+                browser_url: String,
+                note: &'static str,
+            }
         }
 
         Ok(CallToolResult::from_serializable(&PrepareResponse {
@@ -97,10 +97,11 @@ impl ApxServer {
 
         match result {
             apx_core::feedback::FeedbackResult::Submitted { url } => {
-                #[derive(Serialize)]
-                struct SubmittedResponse {
-                    status: &'static str,
-                    issue_url: String,
+                tool_response! {
+                    struct SubmittedResponse {
+                        status: &'static str,
+                        issue_url: String,
+                    }
                 }
                 Ok(CallToolResult::from_serializable(&SubmittedResponse {
                     status: "submitted",
@@ -108,11 +109,12 @@ impl ApxServer {
                 }))
             }
             apx_core::feedback::FeedbackResult::Fallback { url, .. } => {
-                #[derive(Serialize)]
-                struct FallbackResponse {
-                    status: &'static str,
-                    message: &'static str,
-                    browser_url: String,
+                tool_response! {
+                    struct FallbackResponse {
+                        status: &'static str,
+                        message: &'static str,
+                        browser_url: String,
+                    }
                 }
                 Ok(CallToolResult::from_serializable(&FallbackResponse {
                     status: "fallback",

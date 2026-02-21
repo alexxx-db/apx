@@ -89,13 +89,14 @@ impl ApxServer {
             Ok(results) => {
                 drop(index_guard);
 
-                #[derive(Serialize)]
-                struct DocsResponse {
-                    source: String,
-                    query: String,
-                    results: Vec<DocsResult>,
-                    #[serde(skip_serializing_if = "Option::is_none")]
-                    note: Option<String>,
+                tool_response! {
+                    struct DocsResponse {
+                        source: String,
+                        query: String,
+                        results: Vec<DocsResult>,
+                        #[serde(skip_serializing_if = "Option::is_none")]
+                        note: Option<String>,
+                    }
                 }
 
                 #[derive(Serialize)]

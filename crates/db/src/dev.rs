@@ -60,52 +60,10 @@ pub async fn table_exists(pool: &SqlitePool, table_name: &str) -> Result<bool, S
     Ok(row.0)
 }
 
-/// Sanitize a query string for FTS5 MATCH syntax.
-/// Wraps each whitespace-separated term in double quotes for safe literal matching.
-/// Terms are joined with OR so that partial matches are returned — FTS5 ranking
-/// naturally scores documents with more matching terms higher.
-pub fn sanitize_fts5_query(query: &str) -> String {
-    query
-        .split_whitespace()
-        .map(|term| {
-            let clean: String = term
-                .chars()
-                .filter(|c| c.is_alphanumeric() || *c == '_' || *c == '-' || *c == '.')
-                .collect();
-            if clean.is_empty() {
-                String::new()
-            } else {
-                format!("\"{clean}\"")
-            }
-        })
-        .filter(|s| !s.is_empty())
-        .collect::<Vec<_>>()
-        .join(" OR ")
-}
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_sanitize_fts5_query_basic() {
-        assert_eq!(sanitize_fts5_query("hello world"), "\"hello\" OR \"world\"");
-    }
-
-    #[test]
-    fn test_sanitize_fts5_query_special_chars() {
-        assert_eq!(
-            sanitize_fts5_query("hello* OR world"),
-            "\"hello\" OR \"OR\" OR \"world\""
-        );
-    }
-
-    #[test]
-    fn test_sanitize_fts5_query_empty() {
-        assert_eq!(sanitize_fts5_query(""), "");
-        assert_eq!(sanitize_fts5_query("   "), "");
-    }
 
     #[tokio::test]
     async fn test_table_exists() {

@@ -378,11 +378,12 @@ impl ApxServer {
         use apx_core::common::OutputMode;
         use apx_core::ops::check::run_check;
 
-        #[derive(Serialize)]
-        struct CheckResponse {
-            status: String,
-            #[serde(skip_serializing_if = "Option::is_none")]
-            errors: Option<String>,
+        tool_response! {
+            struct CheckResponse {
+                status: String,
+                #[serde(skip_serializing_if = "Option::is_none")]
+                errors: Option<String>,
+            }
         }
 
         let response = match run_check(&path, OutputMode::Quiet).await {
@@ -397,12 +398,7 @@ impl ApxServer {
         };
 
         if response.errors.is_some() {
-            match serde_json::to_value(&response) {
-                Ok(value) => Ok(CallToolResult::structured_error(value)),
-                Err(e) => Ok(CallToolResult::error(vec![Content::text(format!(
-                    "Failed to serialize response: {e}"
-                ))])),
-            }
+            Ok(CallToolResult::from_serializable_error(&response))
         } else {
             Ok(CallToolResult::from_serializable(&response))
         }
@@ -530,17 +526,18 @@ impl ApxServer {
             )
         };
 
-        #[derive(Serialize)]
-        struct RouteInfoResponse {
-            operation_id: String,
-            method: String,
-            path: String,
-            parameters: Vec<ParamInfo>,
-            #[serde(skip_serializing_if = "Option::is_none")]
-            request_body_schema: Option<Value>,
-            #[serde(skip_serializing_if = "Option::is_none")]
-            response_schema: Option<Value>,
-            example: String,
+        tool_response! {
+            struct RouteInfoResponse {
+                operation_id: String,
+                method: String,
+                path: String,
+                parameters: Vec<ParamInfo>,
+                #[serde(skip_serializing_if = "Option::is_none")]
+                request_body_schema: Option<Value>,
+                #[serde(skip_serializing_if = "Option::is_none")]
+                response_schema: Option<Value>,
+                example: String,
+            }
         }
 
         let response = RouteInfoResponse {
@@ -596,7 +593,16 @@ impl ApxServer {
         };
 
         match parse_openapi_operations(&openapi) {
-            Ok(routes) => Ok(CallToolResult::from_serializable(&routes)),
+            Ok(routes) => {
+                tool_response! {
+                    struct RoutesResponse {
+                        routes: Vec<RouteInfo>,
+                    }
+                }
+                Ok(CallToolResult::from_serializable(&RoutesResponse {
+                    routes,
+                }))
+            }
             Err(e) => Ok(CallToolResult::error(vec![Content::text(e)])),
         }
     }
@@ -879,6 +885,42 @@ mod tests {
             routes[0].parameters[0].description.as_deref(),
             Some("Op-level ID")
         );
+    }
+
+    #[test]
+    fn routes_response_structured_content_is_object() {
+        // MCP spec requires structuredContent to be a JSON object, not an array.
+        // Vec<RouteInfo> doesn't implement StructuredObject, so it can't be
+        // passed to from_serializable — this is enforced at compile time.
+        // The RoutesResponse wrapper ensures the output is always an object.
+        tool_response! {
+            struct RoutesResponse {
+                routes: Vec<RouteInfo>,
+            }
+        }
+
+        let routes = parse_openapi_operations(&serde_json::json!({
+            "paths": {
+                "/items": {
+                    "get": {
+                        "operationId": "listItems",
+                        "summary": "List all items"
+                    }
+                }
+            }
+        }))
+        .unwrap();
+
+        let result = CallToolResult::from_serializable(&RoutesResponse { routes });
+        let sc = result
+            .structured_content
+            .expect("structured_content should be set");
+        assert!(
+            sc.is_object(),
+            "structuredContent must be a JSON object, got: {sc}"
+        );
+        // Verify the routes are nested under "routes" key
+        assert!(sc.get("routes").unwrap().is_array());
     }
 
     #[test]

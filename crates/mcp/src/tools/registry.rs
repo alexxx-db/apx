@@ -85,7 +85,9 @@ impl ApxServer {
 
         // Search using async DB layer
         let pool = self.ctx.dev_db.pool().clone();
-        let index = ComponentIndex::new(pool);
+        let index = ComponentIndex::new(pool).map_err(|e| {
+            rmcp::ErrorData::internal_error(format!("Failed to create index: {e}"), None)
+        })?;
         let search_results = match index
             .search(&args.query, args.limit, configured_registries.as_ref())
             .await
@@ -98,11 +100,12 @@ impl ApxServer {
             }
         };
 
-        #[derive(serde::Serialize)]
-        struct SearchResponse {
-            query: String,
-            configured_registries: Vec<String>,
-            results: Vec<SearchResultItem>,
+        tool_response! {
+            struct SearchResponse {
+                query: String,
+                configured_registries: Vec<String>,
+                results: Vec<SearchResultItem>,
+            }
         }
 
         #[derive(serde::Serialize)]
@@ -158,15 +161,16 @@ impl ApxServer {
             Ok(result) => {
                 tracing::info!("Component {} added successfully", args.component_id);
 
-                #[derive(serde::Serialize)]
-                struct AddResponse {
-                    component_id: String,
-                    written_files: Vec<String>,
-                    unchanged_files: Vec<String>,
-                    dependencies_installed: Vec<String>,
-                    auto_detected_deps: Vec<String>,
-                    css_updated: Option<String>,
-                    warnings: Vec<String>,
+                tool_response! {
+                    struct AddResponse {
+                        component_id: String,
+                        written_files: Vec<String>,
+                        unchanged_files: Vec<String>,
+                        dependencies_installed: Vec<String>,
+                        auto_detected_deps: Vec<String>,
+                        css_updated: Option<String>,
+                        warnings: Vec<String>,
+                    }
                 }
 
                 let response = AddResponse {
@@ -243,11 +247,12 @@ impl ApxServer {
             }
         };
 
-        #[derive(serde::Serialize)]
-        struct ListResponse {
-            registry: String,
-            total: usize,
-            items: Vec<ListItem>,
+        tool_response! {
+            struct ListResponse {
+                registry: String,
+                total: usize,
+                items: Vec<ListItem>,
+            }
         }
 
         #[derive(serde::Serialize)]
