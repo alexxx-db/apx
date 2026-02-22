@@ -12,6 +12,10 @@ pub enum DatabricksError {
     Config(String),
     #[error("CLI error: {0}")]
     Cli(String),
+    #[error("WebSocket error: {0}")]
+    WebSocket(String),
+    #[error("validation error: {0}")]
+    Validation(String),
     #[error("HTTP error: {0}")]
     Http(#[from] reqwest::Error),
     #[error("I/O error: {0}")]
