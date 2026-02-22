@@ -1,6 +1,6 @@
 use crate::info_content::APX_INFO_CONTENT;
-use crate::tools::project::parse_openapi_operations;
-use crate::validation::validate_app_path;
+use crate::tools::openapi::parse_openapi_operations;
+use crate::validation::validated_app_path;
 use rmcp::model::*;
 use serde::Serialize;
 
@@ -59,7 +59,7 @@ struct ProjectContext {
 }
 
 pub async fn read_project_resource(app_path: &str) -> Result<ReadResourceResult, String> {
-    let path = validate_app_path(app_path)?;
+    let path = validated_app_path(app_path).map_err(|e| e.message)?;
 
     use apx_core::common::{read_project_metadata, read_python_dependencies};
     use apx_core::interop::get_databricks_sdk_version;
@@ -118,14 +118,14 @@ async fn try_parse_routes(
     metadata: &apx_core::common::ProjectMetadata,
 ) -> Result<Vec<RouteSummary>, String> {
     use apx_core::interop::generate_openapi_spec;
+    use apx_core::openapi::spec::OpenApiSpec;
 
     let (openapi_content, _) =
         generate_openapi_spec(path, &metadata.app_entrypoint, &metadata.app_slug).await?;
 
-    let openapi: serde_json::Value =
-        serde_json::from_str(&openapi_content).map_err(|e| format!("Parse error: {e}"))?;
+    let spec = OpenApiSpec::from_json(&openapi_content)?;
 
-    let route_infos = parse_openapi_operations(&openapi)?;
+    let route_infos = parse_openapi_operations(&spec)?;
 
     Ok(route_infos
         .into_iter()

@@ -287,6 +287,7 @@ dependencies = [
 name = "apx-mcp"
 version = "0.3.3"
 dependencies = [
+ "apx-cli",
  "apx-common",
  "apx-core",
  "apx-db",
@@ -295,6 +296,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
+ "tempfile",
  "tokio",
  "tracing",
 ]
@@ -5015,6 +5017,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-stream",
  "tokio-util",
  "tracing",
 ]

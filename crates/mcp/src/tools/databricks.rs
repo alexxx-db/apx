@@ -1,6 +1,6 @@
 use crate::server::ApxServer;
-use crate::tools::ToolResultExt;
-use crate::validation::validate_app_path;
+use crate::tools::{ToolError, ToolResultExt};
+use crate::validation::validated_app_path;
 use apx_core::dotenv::DotenvFile;
 use apx_core::external::CommandError;
 use apx_core::external::databricks::{AppsLogsArgs, DatabricksCli};
@@ -143,8 +143,7 @@ impl ApxServer {
         &self,
         args: DatabricksAppsLogsArgs,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let cwd = validate_app_path(&args.app_path)
-            .map_err(|e| rmcp::ErrorData::invalid_params(e, None))?;
+        let cwd = validated_app_path(&args.app_path)?;
 
         let mut resolved_from_yml = false;
 
@@ -167,9 +166,10 @@ impl ApxServer {
                     name
                 }
                 Err(e) => {
-                    return Ok(CallToolResult::error(vec![Content::text(format!(
+                    return ToolError::OperationFailed(format!(
                         "Failed to auto-detect app name: {e}"
-                    ))]));
+                    ))
+                    .into_result();
                 }
             },
         };
@@ -178,15 +178,18 @@ impl ApxServer {
         let cli = match DatabricksCli::new() {
             Ok(cli) => cli,
             Err(CommandError::NotFound { .. }) => {
-                return Ok(CallToolResult::error(vec![Content::text(
+                return ToolError::OperationFailed(
                     "Databricks CLI executable not found (`databricks`). \
-                    Please install Databricks CLI v0.280.0 or higher and ensure it's on PATH.",
-                )]));
+                    Please install Databricks CLI v0.280.0 or higher and ensure it's on PATH."
+                        .to_string(),
+                )
+                .into_result();
             }
             Err(e) => {
-                return Ok(CallToolResult::error(vec![Content::text(format!(
+                return ToolError::OperationFailed(format!(
                     "Failed to resolve databricks CLI: {e}"
-                ))]));
+                ))
+                .into_result();
             }
         };
 
@@ -206,20 +209,22 @@ impl ApxServer {
         let result = match cli.apps_logs(logs_args).await {
             Ok(r) => r,
             Err(CommandError::NotFound { .. }) => {
-                return Ok(CallToolResult::error(vec![Content::text(
+                return ToolError::OperationFailed(
                     "Databricks CLI executable not found (`databricks`). \
-                    Please install Databricks CLI v0.280.0 or higher and ensure it's on PATH.",
-                )]));
+                    Please install Databricks CLI v0.280.0 or higher and ensure it's on PATH."
+                        .to_string(),
+                )
+                .into_result();
             }
             Err(CommandError::Timeout { timeout_secs, .. }) => {
-                return Ok(CallToolResult::error(vec![Content::text(format!(
+                return ToolError::OperationFailed(format!(
                     "Timed out after {timeout_secs}s running: databricks apps logs"
-                ))]));
+                ))
+                .into_result();
             }
             Err(e) => {
-                return Ok(CallToolResult::error(vec![Content::text(format!(
-                    "Failed to execute command: {e}"
-                ))]));
+                return ToolError::OperationFailed(format!("Failed to execute command: {e}"))
+                    .into_result();
             }
         };
 
@@ -239,23 +244,25 @@ impl ApxServer {
                 || combined.contains("unknown subcommand")
                 || combined.contains("no such command")
             {
-                return Ok(CallToolResult::error(vec![Content::text(format!(
+                return ToolError::OperationFailed(format!(
                     "Databricks CLI does not support `databricks apps logs` in this version. \
                     Please upgrade Databricks CLI to v0.280.0 or higher.\n\n\
                     Command: {cmd_str}\n\
                     Exit code: {returncode}\n\
                     stderr:\n{stderr_t}\n\
                     stdout:\n{stdout_t}"
-                ))]));
+                ))
+                .into_result();
             }
 
-            return Ok(CallToolResult::error(vec![Content::text(format!(
+            return ToolError::OperationFailed(format!(
                 "`databricks apps logs` failed.\n\n\
                 Command: {cmd_str}\n\
                 Exit code: {returncode}\n\
                 stderr:\n{stderr_t}\n\
                 stdout:\n{stdout_t}"
-            ))]));
+            ))
+            .into_result();
         }
 
         tool_response! {
