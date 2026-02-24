@@ -137,7 +137,7 @@ checksum = "a23eb6b1614318a8071c9b2521f36b424b2c83db5eb3a0fead4a6c0809af6e61"
 
 [[package]]
 name = "apx-agent"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "apx-common",
  "apx-db",
@@ -156,7 +156,7 @@ dependencies = [
 
 [[package]]
 name = "apx-bin"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "apx-cli",
  "apx-core",
@@ -164,7 +164,7 @@ dependencies = [
 
 [[package]]
 name = "apx-cli"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "apx-common",
  "apx-core",
@@ -192,7 +192,7 @@ dependencies = [
 
 [[package]]
 name = "apx-common"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "chrono",
  "dirs 5.0.1",
@@ -203,7 +203,7 @@ dependencies = [
 
 [[package]]
 name = "apx-core"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "apx-agent",
  "apx-common",
@@ -261,7 +261,7 @@ dependencies = [
 
 [[package]]
 name = "apx-databricks-sdk"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "chrono",
  "dirs 5.0.1",
@@ -278,7 +278,7 @@ dependencies = [
 
 [[package]]
 name = "apx-db"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "apx-common",
  "dirs 5.0.1",
@@ -289,7 +289,7 @@ dependencies = [
 
 [[package]]
 name = "apx-mcp"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "apx-cli",
  "apx-common",
@@ -307,7 +307,7 @@ dependencies = [
 
 [[package]]
 name = "apx-studio"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "dirs 5.0.1",
  "serde",
