@@ -38,11 +38,10 @@ pub fn find_class<'a>(stmts: &'a [Stmt], class_name: &str) -> Option<&'a StmtCla
 
 /// Find the end offset of the last statement in a class body.
 pub fn class_body_end(class_def: &StmtClassDef) -> usize {
-    class_def
-        .body
-        .last()
-        .map(|stmt| stmt.range().end().into())
-        .unwrap_or_else(|| class_def.range().end().into())
+    class_def.body.last().map_or_else(
+        || class_def.range().end().into(),
+        |stmt| stmt.range().end().into(),
+    )
 }
 
 /// Detect the indentation level of the first statement in a class body.
@@ -50,7 +49,7 @@ pub fn class_body_indent(source: &str, class_def: &StmtClassDef) -> String {
     if let Some(first_stmt) = class_def.body.first() {
         let offset: usize = first_stmt.range().start().into();
         // Walk backwards from the statement start to find the line start
-        let line_start = source[..offset].rfind('\n').map(|i| i + 1).unwrap_or(0);
+        let line_start = source[..offset].rfind('\n').map_or(0, |i| i + 1);
         let prefix = &source[line_start..offset];
         // Extract leading whitespace
         let indent: String = prefix.chars().take_while(|c| c.is_whitespace()).collect();
@@ -61,9 +60,6 @@ pub fn class_body_indent(source: &str, class_def: &StmtClassDef) -> String {
 
 /// Info about a found function call expression.
 pub struct CallInfo {
-    /// The full range of the call expression.
-    #[allow(dead_code)]
-    pub range: TextRange,
     /// Existing keyword arguments.
     pub keywords: Vec<KeywordInfo>,
     /// The range of the arguments (inside the parentheses).
@@ -72,8 +68,6 @@ pub struct CallInfo {
 
 pub struct KeywordInfo {
     pub name: String,
-    #[allow(dead_code)]
-    pub range: TextRange,
     /// If the keyword value is a list, the range of that list expression.
     pub list_range: Option<TextRange>,
 }
@@ -121,7 +115,6 @@ fn find_call_in_expr(expr: &Expr, call_target: &str) -> Option<CallInfo> {
                 .collect();
 
             return Some(CallInfo {
-                range: call.range,
                 keywords,
                 args_end: usize::from(call.range.end()) - 1, // position of closing `)`
             });
@@ -137,11 +130,7 @@ fn keyword_info(kw: &Keyword) -> Option<KeywordInfo> {
     } else {
         None
     };
-    Some(KeywordInfo {
-        name,
-        range: kw.range,
-        list_range,
-    })
+    Some(KeywordInfo { name, list_range })
 }
 
 fn expr_name(expr: &Expr) -> String {

@@ -37,8 +37,11 @@ pub struct DocChunk {
 /// Search result with score
 #[derive(Debug, Clone, Serialize)]
 pub struct DocSearchResult {
+    /// Matched documentation text.
     pub text: String,
+    /// Path of the source file containing this result.
     pub source_file: String,
+    /// FTS5 relevance score (lower is more relevant).
     pub score: f32,
 }
 
@@ -131,8 +134,7 @@ fn chunk_text(
             // Find last space before end
             enriched_text[start..end]
                 .rfind(' ')
-                .map(|pos| start + pos)
-                .unwrap_or(end)
+                .map_or(end, |pos| start + pos)
         } else {
             end
         };
@@ -176,15 +178,6 @@ pub struct SDKDocsIndex {
 impl SDKDocsIndex {
     /// Create a new SDK docs index using the provided pool
     pub fn new(pool: SqlitePool) -> Self {
-        Self {
-            pool,
-            version: None,
-        }
-    }
-
-    /// Create with a specific pool (for testing or custom setups)
-    #[allow(dead_code)]
-    pub fn with_pool(pool: SqlitePool) -> Self {
         Self {
             pool,
             version: None,
@@ -427,6 +420,7 @@ impl SDKDocsIndex {
 }
 
 #[cfg(test)]
+// Reason: panicking on failure is idiomatic in tests
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
@@ -452,6 +446,16 @@ mod tests {
         assert_eq!(svc, "clusters");
         assert_eq!(ent, "ClustersAPI");
         assert_eq!(op, "create");
+    }
+
+    impl SDKDocsIndex {
+        /// Create with a specific pool (for testing)
+        pub fn with_pool(pool: SqlitePool) -> Self {
+            Self {
+                pool,
+                version: None,
+            }
+        }
     }
 
     #[test]

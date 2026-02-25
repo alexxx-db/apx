@@ -335,13 +335,14 @@ fn derive_related_query_key(path: &str) -> String {
 }
 
 #[cfg(test)]
+// Reason: panicking on failure is idiomatic in tests
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
     use crate::tools::ToolResultExt;
     use rmcp::model::CallToolResult;
 
-    fn parse_test_spec(json: serde_json::Value) -> OpenApiSpec {
+    fn parse_test_spec(json: Value) -> OpenApiSpec {
         serde_json::from_value(json).unwrap()
     }
 

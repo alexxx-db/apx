@@ -1,22 +1,15 @@
-#![forbid(unsafe_code)]
-#![deny(warnings, unused_must_use, dead_code, missing_debug_implementations)]
-#![deny(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::todo,
-    clippy::unimplemented,
-    clippy::dbg_macro
-)]
-
 //! Shared types and utilities for APX flux system
 //!
 //! This crate contains shared functionality used by both the main `apx` CLI
 //! and the standalone `apx-agent` binary.
 
+/// Databricks bundle configuration parsing and app name resolution.
 pub mod bundles;
+/// Centralized log formatting, timestamp formatting, and severity utilities.
 pub mod format;
+/// Network host constants for binding, client connections, and browser URLs.
 pub mod hosts;
+/// Pure types and logic for flux OTEL log records, filtering, and aggregation.
 pub mod storage;
 
 use serde::{Deserialize, Serialize};
@@ -27,8 +20,8 @@ use std::time::Duration;
 
 // Re-export commonly used types
 pub use storage::{
-    AggregatedRecord, LogAggregator, LogRecord, flux_dir, get_aggregation_key, should_skip_log,
-    should_skip_log_message, source_label,
+    AggregatedRecord, LogAggregator, LogRecord, ServiceKind, flux_dir, get_aggregation_key,
+    should_skip_log, should_skip_log_message, source_label,
 };
 
 /// Version of the apx-common crate, used for agent version matching.
@@ -46,19 +39,24 @@ const LOG_FILENAME: &str = "agent.log";
 /// Lock file contents.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FluxLock {
+    /// OS process ID of the running agent.
     pub pid: u32,
+    /// TCP port the agent listens on.
     pub port: u16,
+    /// Unix timestamp (seconds) when the agent started.
     pub started_at: i64,
+    /// Crate version of the agent that wrote this lock.
     #[serde(default)]
     pub version: Option<String>,
 }
 
 impl FluxLock {
     /// Create a new lock for the current process.
+    #[must_use]
     pub fn new(pid: u32) -> Self {
         let started_at = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs() as i64)
+            .map(|d| d.as_secs().cast_signed())
             .unwrap_or(0);
 
         Self {
@@ -70,17 +68,29 @@ impl FluxLock {
     }
 }
 
-/// Get the lock file path (~/.apx/logs/agent.lock).
+/// Get the lock file path (`~/.apx/logs/agent.lock`).
+///
+/// # Errors
+///
+/// Returns an error if the home directory cannot be determined.
 pub fn lock_path() -> Result<PathBuf, String> {
     Ok(flux_dir()?.join(LOCK_FILENAME))
 }
 
-/// Get the daemon log file path (~/.apx/logs/agent.log).
+/// Get the daemon log file path (`~/.apx/logs/agent.log`).
+///
+/// # Errors
+///
+/// Returns an error if the home directory cannot be determined.
 pub fn log_path() -> Result<PathBuf, String> {
     Ok(flux_dir()?.join(LOG_FILENAME))
 }
 
 /// Read the lock file if it exists.
+///
+/// # Errors
+///
+/// Returns an error if the lock file exists but cannot be read or parsed.
 pub fn read_lock() -> Result<Option<FluxLock>, String> {
     let path = lock_path()?;
     if !path.exists() {
@@ -97,6 +107,10 @@ pub fn read_lock() -> Result<Option<FluxLock>, String> {
 }
 
 /// Write the lock file.
+///
+/// # Errors
+///
+/// Returns an error if the lock file cannot be written.
 pub fn write_lock(lock: &FluxLock) -> Result<(), String> {
     let path = lock_path()?;
 
@@ -112,6 +126,10 @@ pub fn write_lock(lock: &FluxLock) -> Result<(), String> {
 }
 
 /// Remove the lock file.
+///
+/// # Errors
+///
+/// Returns an error if the lock file exists but cannot be removed.
 pub fn remove_lock() -> Result<(), String> {
     let path = lock_path()?;
     if path.exists() {
@@ -121,12 +139,14 @@ pub fn remove_lock() -> Result<(), String> {
 }
 
 /// Check if flux is accepting connections at the given port.
+#[must_use]
 pub fn is_flux_listening(port: u16) -> bool {
     let addr = std::net::SocketAddr::from((hosts::CLIENT_HOST_OCTETS, port));
     TcpStream::connect_timeout(&addr, Duration::from_millis(500)).is_ok()
 }
 
 /// Check if flux is currently running by testing TCP connectivity.
+#[must_use]
 pub fn is_running() -> bool {
     is_flux_listening(FLUX_PORT)
 }

@@ -12,16 +12,27 @@ const FLUX_DIR: &str = ".apx/logs";
 /// A log record to be inserted into the database.
 #[derive(Debug, Clone)]
 pub struct LogRecord {
+    /// Event timestamp in nanoseconds since epoch.
     pub timestamp_ns: i64,
+    /// Observed timestamp in nanoseconds since epoch.
     pub observed_timestamp_ns: i64,
+    /// OTLP severity number (1=TRACE, 9=INFO, 17=ERROR, etc.).
     pub severity_number: Option<i32>,
+    /// Human-readable severity level (e.g. "INFO", "ERROR").
     pub severity_text: Option<String>,
+    /// Log message body.
     pub body: Option<String>,
+    /// Service name that emitted this log (e.g. "myapp_app", "myapp_db").
     pub service_name: Option<String>,
+    /// Filesystem path of the originating application.
     pub app_path: Option<String>,
-    pub resource_attributes: Option<String>, // JSON
-    pub log_attributes: Option<String>,      // JSON
+    /// OTLP resource attributes serialized as JSON.
+    pub resource_attributes: Option<String>,
+    /// OTLP log attributes serialized as JSON.
+    pub log_attributes: Option<String>,
+    /// Distributed trace identifier.
     pub trace_id: Option<String>,
+    /// Span identifier within a trace.
     pub span_id: Option<String>,
 }
 
@@ -29,7 +40,8 @@ impl LogRecord {
     /// Return the effective timestamp in milliseconds, falling back to
     /// `observed_timestamp_ns` when `timestamp_ns` is zero (e.g. OpenTelemetry
     /// tracing bridge logs).
-    pub fn effective_timestamp_ms(&self) -> i64 {
+    #[must_use]
+    pub const fn effective_timestamp_ms(&self) -> i64 {
         let ns = if self.timestamp_ns == 0 {
             self.observed_timestamp_ns
         } else {
@@ -39,22 +51,56 @@ impl LogRecord {
     }
 
     /// Derive a short source label from `service_name`.
+    #[must_use]
     pub fn source_label(&self) -> &'static str {
-        source_label(self.service_name.as_deref().unwrap_or("unknown"))
+        ServiceKind::from_service_name(self.service_name.as_deref().unwrap_or("unknown")).label()
+    }
+}
+
+/// Fixed set of service kinds for display and color-coding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ServiceKind {
+    /// Backend application service (`_app` suffix).
+    App,
+    /// Frontend UI service (`_ui` suffix).
+    Ui,
+    /// Database proxy service (`_db` suffix).
+    Db,
+    /// Any other service.
+    Other,
+}
+
+impl ServiceKind {
+    /// Classify a service name by its `_app` / `_ui` / `_db` suffix.
+    #[must_use]
+    pub fn from_service_name(name: &str) -> Self {
+        if name.ends_with("_app") {
+            Self::App
+        } else if name.ends_with("_ui") {
+            Self::Ui
+        } else if name.ends_with("_db") {
+            Self::Db
+        } else {
+            Self::Other
+        }
+    }
+
+    /// Short display label: `"app"`, `"ui"`, `"db"`, or `"apx"`.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::App => "app",
+            Self::Ui => "ui",
+            Self::Db => "db",
+            Self::Other => "apx",
+        }
     }
 }
 
 /// Derive a short source label from a service name string.
+#[must_use]
 pub fn source_label(service_name: &str) -> &'static str {
-    if service_name.ends_with("_app") {
-        "app"
-    } else if service_name.ends_with("_ui") {
-        "ui"
-    } else if service_name.ends_with("_db") {
-        "db"
-    } else {
-        "apx"
-    }
+    ServiceKind::from_service_name(service_name).label()
 }
 
 // ---------------------------------------------------------------------------
@@ -72,6 +118,7 @@ const APX_MIN_SEVERITY: i32 = 5;
 /// This is used by OTEL forwarding in `process.rs` where only the message string
 /// is available. The full `should_skip_log(&LogRecord)` delegates to this function
 /// for message-based filtering.
+#[must_use]
 pub fn should_skip_log_message(message: &str) -> bool {
     // OTEL batch processor internals
     if message.starts_with("BatchLogProcessor.")
@@ -121,6 +168,7 @@ pub fn should_skip_log_message(message: &str) -> bool {
 }
 
 /// Check if a log record should be skipped (internal/noisy logs).
+#[must_use]
 pub fn should_skip_log(record: &LogRecord) -> bool {
     let service_name = record.service_name.as_deref().unwrap_or("");
     let severity_number = record.severity_number.unwrap_or(9);
@@ -135,6 +183,7 @@ pub fn should_skip_log(record: &LogRecord) -> bool {
 }
 
 /// Get aggregation key for a message if it should be aggregated.
+#[must_use]
 pub fn get_aggregation_key(record: &LogRecord) -> Option<(String, &'static str)> {
     let message = record.body.as_deref().unwrap_or("");
     let service = record.service_name.as_deref().unwrap_or("");
@@ -159,9 +208,13 @@ pub fn get_aggregation_key(record: &LogRecord) -> Option<(String, &'static str)>
 /// A single flushed aggregation bucket.
 #[derive(Debug, Clone)]
 pub struct AggregatedRecord {
+    /// Number of messages aggregated in this bucket.
     pub count: usize,
+    /// Timestamp (ms) of the first message in the bucket.
     pub timestamp_ms: i64,
+    /// Human-readable summary template for the aggregated messages.
     pub template: &'static str,
+    /// Service name that produced the aggregated messages.
     pub service_name: String,
 }
 
@@ -185,6 +238,8 @@ pub struct LogAggregator {
 // that only shows bucket count.
 
 impl LogAggregator {
+    /// Create a new empty aggregator.
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -258,7 +313,11 @@ impl LogAggregator {
     }
 }
 
-/// Get the flux directory path (~/.apx/logs).
+/// Get the flux directory path (`~/.apx/logs`).
+///
+/// # Errors
+///
+/// Returns an error if the home directory cannot be determined.
 pub fn flux_dir() -> Result<PathBuf, String> {
     let home = dirs::home_dir().ok_or("Could not determine home directory")?;
     Ok(home.join(FLUX_DIR))

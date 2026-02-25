@@ -6,9 +6,6 @@
 //! - FetchIR: Fetch function representation
 //! - HookIR: React Query hook representation
 
-// Allow dead code for IR types that are part of the design but not yet fully utilized.
-#![allow(dead_code)]
-
 use super::types::{TsTypeDef, TypeRef};
 
 /// HTTP method
@@ -22,7 +19,7 @@ pub enum HttpMethod {
 }
 
 impl HttpMethod {
-    pub fn as_str(&self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             HttpMethod::Get => "GET",
             HttpMethod::Post => "POST",
@@ -32,7 +29,7 @@ impl HttpMethod {
         }
     }
 
-    pub fn is_query(&self) -> bool {
+    pub fn is_query(self) -> bool {
         matches!(self, HttpMethod::Get)
     }
 }
@@ -51,19 +48,9 @@ pub enum OperationKind {
 pub struct OperationIR {
     /// Sanitized TypeScript identifier (e.g., "listItems")
     pub name: String,
-    /// Query or mutation
-    pub kind: OperationKind,
-    /// URL path (e.g., "/items/{itemId}")
-    pub path: String,
-    /// HTTP method
-    pub method: HttpMethod,
 
     /// Normalized parameters (None = no params)
     pub params: Option<ParamsIR>,
-    /// Request body (None = no body)
-    pub body: Option<BodyIR>,
-    /// Response information
-    pub response: ResponseIR,
 
     /// Precomputed fetch function IR
     pub fetch: FetchIR,

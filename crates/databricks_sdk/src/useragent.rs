@@ -6,17 +6,23 @@ use std::fmt;
 /// ```text
 /// {product}/{product_version} apx-databricks-sdk-rust/{sdk_version} rust/{rust_version} os/{os} auth/{auth_type} [extras...] [upstream/{name}] [upstream-version/{ver}] [runtime/{ver}] [cicd/{provider}]
 /// ```
+#[derive(Debug)]
 pub struct UserAgent {
+    /// Sanitized product name.
     product: String,
+    /// Sanitized product version.
     product_version: String,
+    /// Optional authentication type tag.
     auth_type: Option<String>,
+    /// Additional key/value pairs appended to the header.
     extras: Vec<(String, String)>,
 }
 
 impl UserAgent {
-    /// Create a new UserAgent with the given product name and version.
+    /// Create a new `UserAgent` with the given product name and version.
     ///
     /// Both values are sanitized — only `[a-zA-Z0-9_.+-]` chars are kept.
+    #[must_use]
     pub fn new(product: &str, product_version: &str) -> Self {
         Self {
             product: sanitize(product),
@@ -27,15 +33,9 @@ impl UserAgent {
     }
 
     /// Set the authentication type (e.g. "databricks-cli").
+    #[must_use]
     pub fn with_auth(mut self, auth_type: &str) -> Self {
         self.auth_type = Some(sanitize(auth_type));
-        self
-    }
-
-    /// Add an extra key/value pair to the User-Agent string.
-    #[allow(dead_code)]
-    pub fn with_extra(mut self, key: &str, value: &str) -> Self {
-        self.extras.push((sanitize(key), sanitize(value)));
         self
     }
 }
@@ -139,6 +139,16 @@ fn detect_cicd() -> Option<&'static str> {
         return Some("teamcity");
     }
     None
+}
+
+#[cfg(test)]
+impl UserAgent {
+    /// Add an extra key/value pair to the User-Agent string.
+    #[must_use]
+    pub fn with_extra(mut self, key: &str, value: &str) -> Self {
+        self.extras.push((sanitize(key), sanitize(value)));
+        self
+    }
 }
 
 #[cfg(test)]

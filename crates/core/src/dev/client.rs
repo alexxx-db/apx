@@ -44,14 +44,13 @@ pub enum HealthError {
 impl std::fmt::Display for HealthError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::ConnectionFailed(msg) => write!(f, "{msg}"),
-            Self::ServerError(msg) => write!(f, "{msg}"),
+            Self::ConnectionFailed(msg) | Self::ServerError(msg) => write!(f, "{msg}"),
         }
     }
 }
 
 /// Configuration for health check waiting behavior
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct HealthCheckConfig {
     /// Total timeout for health checks (in seconds)
     pub timeout_secs: u64,
@@ -71,54 +70,18 @@ impl Default for HealthCheckConfig {
     }
 }
 
-/// Wait for the dev server to become healthy.
-/// Returns Ok(()) if healthy, Err with message if timeout exceeded.
-#[allow(dead_code)]
-pub async fn wait_for_healthy(port: u16, config: &HealthCheckConfig) -> Result<(), String> {
-    use std::time::Instant;
-
-    // Give server time to start Python/tokio before polling
-    tokio::time::sleep(Duration::from_millis(config.initial_delay_ms)).await;
-
-    let deadline = Instant::now() + Duration::from_secs(config.timeout_secs);
-    let mut first_attempt = true;
-
-    while Instant::now() < deadline {
-        match status(port).await {
-            Ok(status_response) if status_response.status == "ok" => return Ok(()),
-            Ok(status_response) => {
-                // Log which services aren't ready yet (only on first attempt)
-                if first_attempt {
-                    debug!(
-                        "Services not ready - frontend: {}, backend: {}, db: {}",
-                        status_response.frontend_status,
-                        status_response.backend_status,
-                        status_response.db_status
-                    );
-                    first_attempt = false;
-                }
-                tokio::time::sleep(Duration::from_millis(config.retry_delay_ms)).await;
-            }
-            Err(e) => {
-                debug!("Health check error: {e}");
-                tokio::time::sleep(Duration::from_millis(config.retry_delay_ms)).await;
-            }
-        }
-    }
-
-    Err(format!(
-        "Dev server failed to become healthy after {}s timeout",
-        config.timeout_secs
-    ))
-}
-
+/// Response from the dev server status endpoint.
 #[derive(Debug, Deserialize)]
 pub struct StatusResponse {
+    /// Overall server status.
     pub status: String,
+    /// Frontend process status.
     pub frontend_status: String,
+    /// Backend process status.
     pub backend_status: String,
+    /// Embedded database status.
     pub db_status: String,
-    /// True if any critical process (frontend/backend) has permanently failed and cannot recover
+    /// True if any critical process (frontend/backend) has permanently failed and cannot recover.
     pub failed: bool,
 }
 
@@ -126,6 +89,7 @@ fn build_url(host: &str, port: u16, path: &str) -> String {
     format!("http://{host}:{port}{path}")
 }
 
+/// Check if the dev server at the given port is healthy.
 pub async fn health(port: u16) -> Result<bool, String> {
     let url = build_url(CLIENT_HOST, port, "/_apx/health");
     debug!(%url, "Sending dev server health request.");

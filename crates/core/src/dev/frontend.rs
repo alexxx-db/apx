@@ -20,7 +20,7 @@ use apx_common::hosts::CLIENT_HOST;
 // ---------------------------------------------------------------------------
 
 /// All immutable and shared-state values needed to construct a [`Frontend`].
-pub(crate) struct FrontendConfig {
+pub struct FrontendConfig {
     pub app_dir: PathBuf,
     pub app_slug: String,
     pub host: String,
@@ -37,7 +37,7 @@ pub(crate) struct FrontendConfig {
 
 /// Self-contained frontend (Vite/Bun) lifecycle manager.
 /// `ProcessManager` interacts only through this API.
-pub(crate) struct Frontend {
+pub struct Frontend {
     child: Arc<Mutex<Option<Child>>>,
     cfg: FrontendConfig,
 }
@@ -135,8 +135,8 @@ impl DevProcess for Frontend {
         drop(guard);
 
         match http_health_probe(CLIENT_HOST, self.cfg.frontend_port).await {
-            ProbeResult::Responded(_) => "healthy",
-            ProbeResult::Failed(_) => "starting",
+            ProbeResult::Responded => "healthy",
+            ProbeResult::Failed => "starting",
         }
     }
 }
