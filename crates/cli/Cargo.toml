@@ -1,6 +1,6 @@
 [package]
 name = "apx-cli"
-version = "0.3.7"
+version = "0.3.8"
 edition.workspace = true
 rust-version.workspace = true
 description.workspace = true
@@ -15,10 +15,10 @@ workspace = true
 
 [dependencies]
 apx-common.workspace = true
-apx-core = { path = "../core" , version = "0.3.7" }
+apx-core = { path = "../core" , version = "0.3.8" }
 apx-db.workspace = true
-apx-databricks-sdk = { path = "../databricks_sdk" , version = "0.3.7" }
-apx-mcp = { path = "../mcp" , version = "0.3.7" }
+apx-databricks-sdk = { path = "../databricks_sdk" , version = "0.3.8" }
+apx-mcp = { path = "../mcp" , version = "0.3.8" }
 clap.workspace = true
 console.workspace = true
 dialoguer.workspace = true
